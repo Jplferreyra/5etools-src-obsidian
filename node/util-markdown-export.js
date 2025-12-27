@@ -69,10 +69,9 @@ class ObsidianMarkdownRenderer extends RendererMarkdown {
 		const cleanName = this._cleanName(name);
 		const cleanSource = source.toUpperCase();
 
-		// Generate wikilink: [[resourceDir/Name (SOURCE)|Display Text]]
-		const wikilink = displayText === name
-			? `[[${resourceDir}/${cleanName} (${cleanSource})]]`
-			: `[[${resourceDir}/${cleanName} (${cleanSource})|${displayText}]]`;
+		// Generate wikilink: ALWAYS include display text [[resourceDir/Name (SOURCE)|Display Text]]
+		const filename = `${cleanName} (${cleanSource})`;
+		const wikilink = `[[${resourceDir}/${filename}|${filename}]]`;
 
 		textStack[0] += wikilink;
 	}
@@ -1672,7 +1671,8 @@ class MarkdownFormatter {
 					// Create wikilink for standard weapon properties (those we have files for)
 					const linkableProperties = ['Ammunition', 'Finesse', 'Heavy', 'Light', 'Loading', 'Range', 'Reach', 'Thrown', 'Two-Handed', 'Versatile'];
 					if (linkableProperties.includes(name) && source) {
-						return `[[weapon-properties/${name} (${source})]]`;
+						const filename = `${name} (${source})`;
+						return `[[weapon-properties/${filename}|${filename}]]`;
 					}
 
 					return name;
@@ -1687,7 +1687,8 @@ class MarkdownFormatter {
 					const masteryStr = typeof m === 'string' ? m : m?.uid || m;
 					const [masteryName, source] = masteryStr.split('|');
 					// Create wikilink to variant rule (will be exported later)
-					return `[[variant-rules/${masteryName} (${source})]]`;
+					const filename = `${masteryName} (${source})`;
+					return `[[variant-rules/${filename}|${filename}]]`;
 				}).join(", ");
 				propParts.push(`**Mastery:** ${masteryLinks}`);
 			}
