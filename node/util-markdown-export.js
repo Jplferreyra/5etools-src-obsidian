@@ -297,6 +297,8 @@ class FrontmatterGenerator {
 				return {...base, ...this._generateSubclass(entry)};
 			case "race":
 				return {...base, ...this._generateRace(entry)};
+			case "subrace":
+				return {...base, ...this._generateSubrace(entry)};
 			case "background":
 				return {...base, ...this._generateBackground(entry)};
 			case "feat":
@@ -306,6 +308,16 @@ class FrontmatterGenerator {
 				return {...base, ...this._generateCondition(entry)};
 			case "deity":
 				return {...base, ...this._generateDeity(entry)};
+			case "language":
+				return {...base, ...this._generateLanguage(entry)};
+			case "vehicle":
+				return {...base, ...this._generateVehicle(entry)};
+			case "object":
+				return {...base, ...this._generateObject(entry)};
+			case "psionic":
+				return {...base, ...this._generatePsionic(entry)};
+			case "reward":
+				return {...base, ...this._generateReward(entry)};
 			default:
 				return base;
 		}
@@ -513,9 +525,32 @@ class FrontmatterGenerator {
 			fm.creature_type = typeof monster.type === "string" ? monster.type : monster.type.type;
 		}
 
-		// Alignment
+		// Alignment - expand codes to full names
 		if (monster.alignment) {
-			fm.alignment = monster.alignment;
+			const alignmentMap = {
+				'L': 'Lawful',
+				'N': 'Neutral',
+				'C': 'Chaotic',
+				'G': 'Good',
+				'E': 'Evil',
+				'U': 'Unaligned',
+				'A': 'Any'
+			};
+
+			if (Array.isArray(monster.alignment)) {
+				const expanded = monster.alignment.map(a => {
+					if (typeof a === 'string') {
+						return alignmentMap[a] || a;
+					} else if (typeof a === 'object' && a.alignment) {
+						// Handle complex alignment objects
+						return a.alignment.map(code => alignmentMap[code] || code).join(' ');
+					}
+					return a;
+				});
+				fm.alignment = expanded.join(' ');
+			} else if (typeof monster.alignment === 'string') {
+				fm.alignment = alignmentMap[monster.alignment] || monster.alignment;
+			}
 		}
 
 		// CR
@@ -523,9 +558,19 @@ class FrontmatterGenerator {
 			fm.cr = typeof monster.cr === "object" ? monster.cr.cr : monster.cr;
 		}
 
-		// AC
+		// AC - extract numeric value from AC objects
 		if (monster.ac) {
-			fm.ac = Array.isArray(monster.ac) ? monster.ac : [monster.ac];
+			const acArray = Array.isArray(monster.ac) ? monster.ac : [monster.ac];
+			const acValues = acArray.map(ac => {
+				if (typeof ac === 'number') {
+					return ac;
+				} else if (typeof ac === 'object' && ac.ac !== undefined) {
+					return ac.ac;
+				}
+				return ac;
+			});
+			// Store just the primary AC value or all values if multiple
+			fm.ac = acValues.length === 1 ? acValues[0] : acValues;
 		}
 
 		// HP
@@ -704,9 +749,65 @@ class FrontmatterGenerator {
 			fm.speed = race.speed;
 		}
 
-		// Ability bonuses
-		if (race.ability) {
-			fm.ability_bonuses = race.ability;
+		// Ability bonuses - format as readable array
+		if (race.ability && Array.isArray(race.ability)) {
+			fm.ability_bonuses = race.ability.map(ab => {
+				if (typeof ab === "object" && !ab.choose) {
+					// Simple ability bonus like {str: 2, dex: 1}
+					const parts = [];
+					for (const [key, value] of Object.entries(ab)) {
+						if (typeof value === "number") {
+							parts.push(`${key.toUpperCase()} +${value}`);
+						}
+					}
+					return parts.join(", ");
+				}
+				return "Choice";
+			});
+		}
+
+		return fm;
+	}
+
+	/**
+	 * Generate subrace-specific frontmatter
+	 */
+	_generateSubrace(subrace) {
+		const fm = {};
+
+		// Base race information
+		if (subrace.raceName) {
+			fm.base_race = subrace.raceName;
+		}
+		if (subrace.raceSource) {
+			fm.base_race_source = subrace.raceSource;
+		}
+
+		// Size
+		if (subrace.size) {
+			fm.size = subrace.size;
+		}
+
+		// Speed
+		if (subrace.speed) {
+			fm.speed = subrace.speed;
+		}
+
+		// Ability bonuses - format as readable array
+		if (subrace.ability && Array.isArray(subrace.ability)) {
+			fm.ability_bonuses = subrace.ability.map(ab => {
+				if (typeof ab === "object" && !ab.choose) {
+					// Simple ability bonus like {str: 2, dex: 1}
+					const parts = [];
+					for (const [key, value] of Object.entries(ab)) {
+						if (typeof value === "number") {
+							parts.push(`${key.toUpperCase()} +${value}`);
+						}
+					}
+					return parts.join(", ");
+				}
+				return "Choice";
+			});
 		}
 
 		return fm;
@@ -810,8 +911,33 @@ class FrontmatterGenerator {
 	_generateDeity(deity) {
 		const fm = {};
 
+		// Expand alignment codes like we do for monsters
 		if (deity.alignment) {
-			fm.alignment = deity.alignment;
+			const alignmentMap = {
+				'L': 'Lawful',
+				'N': 'Neutral',
+				'C': 'Chaotic',
+				'G': 'Good',
+				'E': 'Evil',
+				'U': 'Unaligned',
+				'A': 'Any'
+			};
+
+			if (Array.isArray(deity.alignment)) {
+				const expanded = deity.alignment.map(a => {
+					if (typeof a === 'string') {
+						return alignmentMap[a] || a;
+					}
+					return a;
+				});
+				fm.alignment = expanded.join(' ');
+			} else if (typeof deity.alignment === 'string') {
+				fm.alignment = alignmentMap[deity.alignment] || deity.alignment;
+			}
+		}
+
+		if (deity.title) {
+			fm.title = deity.title;
 		}
 
 		if (deity.domains) {
@@ -822,6 +948,167 @@ class FrontmatterGenerator {
 			fm.pantheon = deity.pantheon;
 		}
 
+		if (deity.symbol) {
+			fm.symbol = deity.symbol;
+		}
+
+		if (deity.province) {
+			fm.province = deity.province;
+		}
+
+		if (deity.category) {
+			fm.category = deity.category;
+		}
+
+		return fm;
+	}
+
+	/**
+	 * Generate language-specific frontmatter
+	 */
+	_generateLanguage(language) {
+		const fm = {};
+
+		// Language type (standard, rare, exotic, secret)
+		if (language.type) {
+			fm.language_type = language.type;
+		}
+
+		// Origin/script
+		if (language.origin) {
+			fm.origin = language.origin;
+		}
+
+		if (language.script) {
+			fm.script = language.script;
+		}
+
+		return fm;
+	}
+
+	/**
+	 * Generate vehicle-specific frontmatter
+	 */
+	_generateVehicle(vehicle) {
+		const fm = {};
+
+		if (vehicle.vehicleType) {
+			const vehicleTypeMap = {
+				'SHIP': 'Ship',
+				'SPELLJAMMER': 'Spelljammer',
+				'INFWAR': 'Infernal War Machine',
+				'CREATURE': 'Creature',
+				'OBJECT': 'Object',
+				'ELEMENTAL_AIRSHIP': 'Elemental Airship'
+			};
+			fm.vehicle_type = vehicleTypeMap[vehicle.vehicleType] || vehicle.vehicleType;
+		}
+
+		if (vehicle.size) {
+			const sizeMap = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
+			fm.size = Array.isArray(vehicle.size)
+				? vehicle.size.map(s => sizeMap[s] || s)
+				: [sizeMap[vehicle.size] || vehicle.size];
+		}
+
+		if (vehicle.terrain) {
+			fm.terrain = vehicle.terrain;
+		}
+
+		if (vehicle.capCrew !== undefined) {
+			fm.crew_capacity = vehicle.capCrew;
+		}
+
+		if (vehicle.capPassenger !== undefined) {
+			fm.passenger_capacity = vehicle.capPassenger;
+		}
+
+		// AC
+		if (vehicle.ac !== undefined) {
+			fm.ac = typeof vehicle.ac === 'object' ? vehicle.ac.ac : vehicle.ac;
+		}
+
+		// HP
+		if (vehicle.hp !== undefined) {
+			fm.hp = typeof vehicle.hp === 'object' ? vehicle.hp.hp : vehicle.hp;
+		}
+
+		// Speed
+		if (vehicle.speed) {
+			fm.speed = vehicle.speed;
+		}
+
+		// Immunities
+		if (vehicle.immune) {
+			fm.damage_immunities = vehicle.immune;
+		}
+
+		return fm;
+	}
+
+	/**
+	 * Generate object-specific frontmatter
+	 */
+	_generateObject(obj) {
+		const fm = {};
+
+		if (obj.objectType) {
+			fm.object_type = obj.objectType;
+		}
+
+		if (obj.size) {
+			const sizeMap = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
+			fm.size = Array.isArray(obj.size)
+				? obj.size.map(s => sizeMap[s] || s)
+				: [sizeMap[obj.size] || obj.size];
+		}
+
+		// AC
+		if (obj.ac !== undefined) {
+			fm.ac = typeof obj.ac === 'object' ? obj.ac.ac : obj.ac;
+		}
+
+		// HP
+		if (obj.hp !== undefined) {
+			fm.hp = typeof obj.hp === 'object' ? obj.hp.hp : obj.hp;
+		}
+
+		// Immunities
+		if (obj.immune) {
+			fm.damage_immunities = obj.immune;
+		}
+
+		return fm;
+	}
+
+	_generatePsionic(psionic) {
+		const fm = {};
+
+		// Psionic type - Discipline or Talent
+		if (psionic.type) {
+			const typeMap = {
+				'D': 'Discipline',
+				'T': 'Talent'
+			};
+			fm.psionic_type = typeMap[psionic.type] || psionic.type;
+		}
+
+		// Order (only for disciplines)
+		if (psionic.order) {
+			fm.order = psionic.order;
+		}
+
+		return fm;
+	}
+
+	_generateReward(reward) {
+		const fm = {};
+
+		// Reward type (Blessing, Boon, Charm, Curse, etc.)
+		if (reward.type) {
+			fm.reward_type = reward.type;
+		}
+
 		return fm;
 	}
 }
@@ -830,14 +1117,24 @@ class FrontmatterGenerator {
  * Formats markdown content for different resource types
  */
 class MarkdownFormatter {
-	constructor(renderer) {
+	constructor(renderer, legendaryGroups = []) {
 		this.renderer = renderer;
+		this.legendaryGroups = legendaryGroups;
+
+		// Build a lookup map for faster access
+		this.legendaryGroupMap = new Map();
+		if (legendaryGroups) {
+			for (const group of legendaryGroups) {
+				const key = `${group.name}|${group.source}`.toLowerCase();
+				this.legendaryGroupMap.set(key, group);
+			}
+		}
 	}
 
 	/**
 	 * Format a complete entry as markdown
 	 */
-	format(entry, entryType, frontmatter) {
+	format(entry, entryType, frontmatter, additionalData = null) {
 		// Generate frontmatter YAML
 		const yaml = this._generateYAML(frontmatter);
 
@@ -855,10 +1152,37 @@ class MarkdownFormatter {
 				content = this._formatItem(entry);
 				break;
 			case "class":
-				content = this._formatClass(entry);
+				content = this._formatClass(entry, additionalData);
+				break;
+			case "subclass":
+				content = this._formatSubclass(entry, additionalData);
 				break;
 			case "feat":
 				content = this._formatFeat(entry);
+				break;
+			case "subrace":
+				content = this._formatSubrace(entry);
+				break;
+			case "language":
+				content = this._formatLanguage(entry);
+				break;
+			case "deity":
+				content = this._formatDeity(entry);
+				break;
+			case "object":
+				content = this._formatObject(entry);
+				break;
+			case "psionic":
+				content = this._formatPsionic(entry);
+				break;
+			case "reward":
+				content = this._formatReward(entry);
+				break;
+			case "table":
+				content = this._formatTable(entry);
+				break;
+			case "vehicle":
+				content = this._formatVehicle(entry);
 				break;
 			default:
 				content = this._formatGeneric(entry);
@@ -1003,7 +1327,11 @@ class MarkdownFormatter {
 			typeStr.push(sizes.map(s => sizeMap[s] || s).join(" or "));
 		}
 		if (monster.type) {
-			const type = typeof monster.type === "string" ? monster.type : monster.type.type;
+			let type = typeof monster.type === "string" ? monster.type : monster.type.type;
+			// Add subtype tags in parentheses if they exist
+			if (typeof monster.type === "object" && monster.type.tags && monster.type.tags.length > 0) {
+				type += ` (${monster.type.tags.join(", ")})`;
+			}
 			typeStr.push(type);
 		}
 		if (monster.alignment) {
@@ -1068,12 +1396,39 @@ class MarkdownFormatter {
 			}
 			additionalStats.push(`**Skills** ${skills.join(", ")}`);
 		}
+		// Damage vulnerabilities, resistances, immunities
+		if (monster.vulnerable) {
+			const vulns = Array.isArray(monster.vulnerable) ? monster.vulnerable.join(", ") : monster.vulnerable;
+			additionalStats.push(`**Damage Vulnerabilities** ${vulns}`);
+		}
+		if (monster.resist) {
+			const resists = Array.isArray(monster.resist) ? monster.resist.join(", ") : monster.resist;
+			additionalStats.push(`**Damage Resistances** ${resists}`);
+		}
+		if (monster.immune) {
+			const immunes = Array.isArray(monster.immune) ? monster.immune.join(", ") : monster.immune;
+			additionalStats.push(`**Damage Immunities** ${immunes}`);
+		}
+		if (monster.conditionImmune) {
+			const condImmunes = Array.isArray(monster.conditionImmune) ? monster.conditionImmune.join(", ") : monster.conditionImmune;
+			additionalStats.push(`**Condition Immunities** ${condImmunes}`);
+		}
 		if (monster.senses) {
 			const senses = Array.isArray(monster.senses) ? monster.senses.join(", ") : monster.senses;
 			additionalStats.push(`**Senses** ${senses}`);
 		}
 		if (monster.passive !== undefined) {
 			additionalStats.push(`**Passive Perception** ${monster.passive}`);
+		}
+		// Initiative (if different from DEX modifier or has special bonuses)
+		const initBonus = this._getInitiativeBonus(monster);
+		if (initBonus !== null) {
+			const dexMod = monster.dex !== undefined ? Parser.getAbilityModNumber(monster.dex) : null;
+			// Only show initiative if it's different from DEX modifier (expertise, advantage, etc.)
+			if (initBonus !== dexMod || (monster.initiative && typeof monster.initiative === "object")) {
+				const sign = initBonus >= 0 ? "+" : "";
+				additionalStats.push(`**Initiative** ${sign}${initBonus}`);
+			}
 		}
 		if (monster.languages) {
 			const langs = Array.isArray(monster.languages) ? monster.languages.join(", ") : monster.languages;
@@ -1093,7 +1448,7 @@ class MarkdownFormatter {
 			parts.push("## Traits\n");
 			for (const trait of monster.trait) {
 				if (trait.name) {
-					parts.push(`### ${trait.name}\n`);
+					parts.push(`### ${this._renderString(trait.name)}\n`);
 				}
 				if (trait.entries) {
 					parts.push(this._renderEntries(trait.entries) + "\n");
@@ -1105,7 +1460,7 @@ class MarkdownFormatter {
 		if (monster.spellcasting && monster.spellcasting.length) {
 			for (const sc of monster.spellcasting) {
 				if (sc.name) {
-					parts.push(`### ${sc.name}\n`);
+					parts.push(`### ${this._renderString(sc.name)}\n`);
 				}
 				if (sc.headerEntries) {
 					parts.push(this._renderEntries(sc.headerEntries) + "\n");
@@ -1116,7 +1471,9 @@ class MarkdownFormatter {
 						if (spellData.spells && spellData.spells.length) {
 							const levelStr = level === "0" ? "Cantrips" : `${level}${this._getOrdinalSuffix(parseInt(level))} level`;
 							const slots = spellData.slots ? ` (${spellData.slots} slots)` : "";
-							parts.push(`**${levelStr}${slots}:** ${spellData.spells.join(", ")}\n`);
+							// Process each spell through _renderString to convert {@spell} tags to wikilinks
+							const spellList = spellData.spells.map(spell => this._renderString(spell)).join(", ");
+							parts.push(`**${levelStr}${slots}:** ${spellList}\n`);
 						}
 					}
 				}
@@ -1131,7 +1488,7 @@ class MarkdownFormatter {
 			parts.push("## Actions\n");
 			for (const action of monster.action) {
 				if (action.name) {
-					parts.push(`### ${action.name}\n`);
+					parts.push(`### ${this._renderString(action.name)}\n`);
 				}
 				if (action.entries) {
 					parts.push(this._renderEntries(action.entries) + "\n");
@@ -1144,7 +1501,7 @@ class MarkdownFormatter {
 			parts.push("## Bonus Actions\n");
 			for (const bonus of monster.bonus) {
 				if (bonus.name) {
-					parts.push(`### ${bonus.name}\n`);
+					parts.push(`### ${this._renderString(bonus.name)}\n`);
 				}
 				if (bonus.entries) {
 					parts.push(this._renderEntries(bonus.entries) + "\n");
@@ -1157,7 +1514,7 @@ class MarkdownFormatter {
 			parts.push("## Reactions\n");
 			for (const reaction of monster.reaction) {
 				if (reaction.name) {
-					parts.push(`### ${reaction.name}\n`);
+					parts.push(`### ${this._renderString(reaction.name)}\n`);
 				}
 				if (reaction.entries) {
 					parts.push(this._renderEntries(reaction.entries) + "\n");
@@ -1168,9 +1525,16 @@ class MarkdownFormatter {
 		// Legendary Actions
 		if (monster.legendary && monster.legendary.length) {
 			parts.push("## Legendary Actions\n");
+
+			// Add legendary actions header text (standard D&D 5e format)
+			// The number of actions is typically 3 unless specified otherwise
+			const actionCount = monster.legendaryActions || 3;
+			const creatureName = monster.isNamedCreature || monster.isNpc ? monster.name : `the ${monster.name.toLowerCase()}`;
+			parts.push(`${creatureName.charAt(0).toUpperCase() + creatureName.slice(1)} can take ${actionCount} legendary actions, choosing from the options below. Only one legendary action option can be used at a time and only at the end of another creature's turn. ${creatureName.charAt(0).toUpperCase() + creatureName.slice(1)} regains spent legendary actions at the start of its turn.\n`);
+
 			for (const legendary of monster.legendary) {
 				if (legendary.name) {
-					parts.push(`### ${legendary.name}\n`);
+					parts.push(`### ${this._renderString(legendary.name)}\n`);
 				}
 				if (legendary.entries) {
 					parts.push(this._renderEntries(legendary.entries) + "\n");
@@ -1183,7 +1547,7 @@ class MarkdownFormatter {
 			parts.push("## Mythic Actions\n");
 			for (const mythic of monster.mythic) {
 				if (mythic.name) {
-					parts.push(`### ${mythic.name}\n`);
+					parts.push(`### ${this._renderString(mythic.name)}\n`);
 				}
 				if (mythic.entries) {
 					parts.push(this._renderEntries(mythic.entries) + "\n");
@@ -1191,24 +1555,30 @@ class MarkdownFormatter {
 			}
 		}
 
-		// Lair Actions
-		if (monster.lair && monster.lair.length) {
-			parts.push("## Lair Actions\n");
-			for (const lair of monster.lair) {
-				if (lair.entries) {
-					parts.push(this._renderEntries(lair.entries) + "\n");
-				}
+		// Lair Actions (from monster data or legendary group)
+		let lairActions = monster.lair;
+		if (!lairActions && monster.legendaryGroup) {
+			const group = this._getLegendaryGroup(monster.legendaryGroup);
+			if (group && group.lairActions) {
+				lairActions = group.lairActions;
 			}
 		}
+		if (lairActions && lairActions.length) {
+			parts.push("## Lair Actions\n");
+			parts.push(this._renderEntries(lairActions) + "\n");
+		}
 
-		// Regional Effects
-		if (monster.regional && monster.regional.length) {
-			parts.push("## Regional Effects\n");
-			for (const regional of monster.regional) {
-				if (regional.entries) {
-					parts.push(this._renderEntries(regional.entries) + "\n");
-				}
+		// Regional Effects (from monster data or legendary group)
+		let regionalEffects = monster.regional;
+		if (!regionalEffects && monster.legendaryGroup) {
+			const group = this._getLegendaryGroup(monster.legendaryGroup);
+			if (group && group.regionalEffects) {
+				regionalEffects = group.regionalEffects;
 			}
+		}
+		if (regionalEffects && regionalEffects.length) {
+			parts.push("## Regional Effects\n");
+			parts.push(this._renderEntries(regionalEffects) + "\n");
 		}
 
 		// Source
@@ -1352,7 +1722,7 @@ class MarkdownFormatter {
 	/**
 	 * Format class content
 	 */
-	_formatClass(cls) {
+	_formatClass(cls, classData) {
 		const parts = [];
 
 		// Title
@@ -1379,75 +1749,19 @@ class MarkdownFormatter {
 			parts.push(abilities.join("  \n") + "\n");
 		}
 
-		// Proficiencies
+		// Proficiencies with wikilinks
 		if (cls.startingProficiencies) {
-			const prof = cls.startingProficiencies;
-			const profParts = [];
-
-			if (prof.armor) {
-				profParts.push(`**Armor:** ${prof.armor.join(", ")}`);
-			}
-			if (prof.weapons) {
-				profParts.push(`**Weapons:** ${prof.weapons.join(", ")}`);
-			}
-			if (prof.tools) {
-				const toolStr = Array.isArray(prof.tools) ? prof.tools.join(", ") : JSON.stringify(prof.tools);
-				profParts.push(`**Tools:** ${toolStr}`);
-			}
-			if (prof.skills) {
-				// Skills is complex - can have choose structures
-				profParts.push(`**Skills:** Choose from class skill list`);
-			}
-
-			if (profParts.length) {
-				parts.push("## Proficiencies\n");
-				parts.push(profParts.join("  \n") + "\n");
-			}
+			parts.push(this._renderClassProficiencies(cls.startingProficiencies) + "\n");
 		}
 
-		// Spellcasting
-		if (cls.spellcastingAbility) {
-			const spellParts = [];
-			const abilMap = {str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"};
-			spellParts.push(`**Spellcasting Ability:** ${abilMap[cls.spellcastingAbility] || cls.spellcastingAbility}`);
-
-			if (cls.casterProgression) {
-				spellParts.push(`**Caster Progression:** ${cls.casterProgression}`);
-			}
-
-			parts.push("## Spellcasting\n");
-			parts.push(spellParts.join("  \n") + "\n");
-		}
-
-		// Class features
+		// Class Features Table
 		if (cls.classFeatures && cls.classFeatures.length) {
-			parts.push("## Class Features\n");
-			parts.push("As a " + cls.name.toLowerCase() + ", you gain the following class features:\n");
-
-			// Group features by level
-			const featuresByLevel = {};
-			for (const feature of cls.classFeatures) {
-				const featureName = typeof feature === "string" ? feature : feature.classFeature;
-				const match = featureName.match(/\|(\d+)(?:\||$)/);
-				const level = match ? parseInt(match[1]) : null;
-
-				if (level) {
-					if (!featuresByLevel[level]) featuresByLevel[level] = [];
-					const displayName = featureName.split("|")[0];
-					featuresByLevel[level].push(displayName);
-				}
-			}
-
-			// List features by level
-			for (const level of Object.keys(featuresByLevel).sort((a, b) => parseInt(a) - parseInt(b))) {
-				parts.push(`**Level ${level}:** ${featuresByLevel[level].join(", ")}\n`);
-			}
+			parts.push(this._renderClassTable(cls, classData) + "\n");
 		}
 
-		// Subclass info
-		if (cls.subclassTitle) {
-			parts.push(`\n## ${cls.subclassTitle}\n`);
-			parts.push(`At 3rd level, you choose a ${cls.subclassTitle.toLowerCase()} that shapes your training and capabilities.\n`);
+		// Detailed Class Features
+		if (cls.classFeatures && cls.classFeatures.length && classData?.classFeature) {
+			parts.push(this._renderClassFeatureDetails(cls, classData) + "\n");
 		}
 
 		// Source
@@ -1458,6 +1772,427 @@ class MarkdownFormatter {
 		}
 
 		return parts.join("\n");
+	}
+
+	/**
+	 * Render class proficiencies with wikilinks
+	 */
+	_renderClassProficiencies(prof) {
+		const parts = ["## Proficiencies\n"];
+		const profParts = [];
+
+		if (prof.armor) {
+			// Convert armor proficiencies to wikilinks
+			const armorLinks = prof.armor.map(a => {
+				if (a === "light") return "Light Armor";
+				if (a === "medium") return "Medium Armor";
+				if (a === "heavy") return "Heavy Armor";
+				if (a === "shield") return "Shields";
+				return a;
+			});
+			profParts.push(`**Armor:** ${armorLinks.join(", ")}`);
+		}
+
+		if (prof.weapons) {
+			// Convert weapon proficiencies to wikilinks
+			const weaponLinks = prof.weapons.map(w => {
+				if (w === "simple") return "Simple Weapons";
+				if (w === "martial") return "Martial Weapons";
+				return this._renderString(w);
+			});
+			profParts.push(`**Weapons:** ${weaponLinks.join(", ")}`);
+		}
+
+		if (prof.tools) {
+			const toolStr = Array.isArray(prof.tools)
+				? prof.tools.map(t => this._renderString(t)).join(", ")
+				: this._renderString(JSON.stringify(prof.tools));
+			profParts.push(`**Tools:** ${toolStr}`);
+		}
+
+		if (prof.skills) {
+			// Handle skill selection
+			if (Array.isArray(prof.skills)) {
+				const first = prof.skills[0];
+				if (typeof first === "object") {
+					if (first.choose) {
+						const choose = first.choose;
+						profParts.push(`**Skills:** Choose ${choose.count || 2} from the class skill list`);
+					} else if (first.any !== undefined) {
+						profParts.push(`**Skills:** Choose ${first.any} from the class skill list`);
+					} else {
+						profParts.push(`**Skills:** ${JSON.stringify(prof.skills)}`);
+					}
+				} else {
+					profParts.push(`**Skills:** ${prof.skills.join(", ")}`);
+				}
+			} else {
+				profParts.push(`**Skills:** ${prof.skills.toString()}`);
+			}
+		}
+
+		parts.push(profParts.join("  \n"));
+		return parts.join("");
+	}
+
+	/**
+	 * Render class features table
+	 */
+	_renderClassTable(cls, classData) {
+		const parts = [`## ${cls.name} Features Table\n`];
+
+		// Build table header
+		const headers = ["Level", "Proficiency Bonus", "Features"];
+
+		// Add class-specific columns from classTableGroups
+		if (cls.classTableGroups) {
+			for (const group of cls.classTableGroups) {
+				if (group.title) {
+					// For spell progression, add the group title as a super-header
+					headers.push(`${group.title}`);
+				} else if (group.colLabels) {
+					// Add each column label
+					for (const label of group.colLabels) {
+						headers.push(this._renderString(label));
+					}
+				}
+			}
+		}
+
+		// Create markdown table
+		parts.push(`| ${headers.join(" | ")} |`);
+		parts.push(`| ${headers.map(() => "---").join(" | ")} |`);
+
+		// Add rows for levels 1-20
+		for (let level = 1; level <= 20; level++) {
+			const profBonus = Math.ceil(level / 4) + 1; // Proficiency bonus by level
+			const row = [level.toString(), `+${profBonus}`];
+
+			// Get features for this level
+			const features = this._getClassFeaturesForLevel(cls, level, classData);
+			row.push(features.join(", "));
+
+			// Add class-specific columns
+			if (cls.classTableGroups) {
+				for (const group of cls.classTableGroups) {
+					const levelIndex = level - 1;
+					if (group.rowsSpellProgression) {
+						// Spell progression table
+						const spellRow = group.rowsSpellProgression[levelIndex];
+						if (spellRow) {
+							row.push(...spellRow.map(slots => slots === 0 ? "—" : slots.toString()));
+						}
+					} else if (group.rows) {
+						// Regular table group
+						const groupRow = group.rows[levelIndex];
+						if (groupRow) {
+							for (const cell of groupRow) {
+								if (typeof cell === "object") {
+									if (cell.type === "bonus") {
+										row.push(`+${cell.value}`);
+									} else if (cell.type === "dice") {
+										// Render dice notation
+										const dice = cell.toRoll[0];
+										row.push(`${dice.number}d${dice.faces}`);
+									} else {
+										// Try to render as entry object
+										row.push(this._renderString(cell));
+									}
+								} else {
+									row.push(this._renderString(cell.toString()));
+								}
+							}
+						}
+					}
+				}
+			}
+
+			parts.push(`| ${row.join(" | ")} |`);
+		}
+
+		parts.push("");
+		return parts.join("\n");
+	}
+
+	/**
+	 * Get class features for a specific level
+	 */
+	_getClassFeaturesForLevel(cls, level, classData) {
+		const features = [];
+
+		for (const feature of cls.classFeatures) {
+			const isSubclassFeature = typeof feature === "object" && feature.gainSubclassFeature;
+			const featureName = typeof feature === "string" ? feature : feature.classFeature;
+			const match = featureName.match(/\|(\d+)(?:\||$)/);
+			const featureLevel = match ? parseInt(match[1]) : null;
+
+			if (featureLevel === level) {
+				const displayName = featureName.split("|")[0];
+
+				if (isSubclassFeature) {
+					// For subclass selection level, add links to all subclasses
+					if (level === 3 || displayName.includes(cls.subclassTitle)) {
+						features.push(`[[#${cls.subclassTitle}|${displayName}]]`);
+					} else {
+						features.push(displayName);
+					}
+				} else {
+					features.push(`[[#${displayName}|${displayName}]]`);
+				}
+			}
+		}
+
+		return features;
+	}
+
+	/**
+	 * Render detailed class feature descriptions (organized by level)
+	 */
+	_renderClassFeatureDetails(cls, classData) {
+		const parts = [];
+
+		// Group features by level
+		const featuresByLevel = {};
+		for (const feature of cls.classFeatures) {
+			const isSubclassFeature = typeof feature === "object" && feature.gainSubclassFeature;
+			const featureName = typeof feature === "string" ? feature : feature.classFeature;
+			const match = featureName.match(/\|(\d+)(?:\||$)/);
+			const level = match ? parseInt(match[1]) : null;
+
+			if (level) {
+				if (!featuresByLevel[level]) featuresByLevel[level] = [];
+				featuresByLevel[level].push({featureName, isSubclassFeature});
+			}
+		}
+
+		// Track if we've already listed subclasses
+		let subclassesListed = false;
+
+		// Render each level's features
+		for (const level of Object.keys(featuresByLevel).sort((a, b) => parseInt(a) - parseInt(b))) {
+			parts.push(`## Level ${level}\n`);
+
+			for (const {featureName, isSubclassFeature} of featuresByLevel[level]) {
+				if (isSubclassFeature) {
+					// Handle subclass feature
+					const subclassFeature = this._findClassFeature(featureName, classData);
+					if (subclassFeature) {
+						parts.push(`### ${subclassFeature.name}\n`);
+						if (subclassFeature.entries) {
+							parts.push(this._renderEntries(subclassFeature.entries) + "\n");
+						}
+					}
+
+					// List all available subclasses only the first time
+					if (!subclassesListed && cls.subclassTitle && classData?.subclass) {
+						parts.push(`**Available ${cls.subclassTitle} Options:**\n`);
+						const subclasses = classData.subclass
+							.filter(sc => sc.className === cls.name && sc.classSource === cls.source)
+							.sort((a, b) => a.name.localeCompare(b.name));
+
+						for (const sc of subclasses) {
+							parts.push(`- [[subclasses/${sc.name} (${sc.source})|${sc.name}]]\n`);
+						}
+						parts.push("");
+						subclassesListed = true;
+					} else if (subclassesListed) {
+						// Reference the earlier list
+						parts.push(`*See the available ${cls.subclassTitle} options listed at Level 3.*\n`);
+					}
+				} else {
+					// Handle regular feature
+					const featureData = this._findClassFeature(featureName, classData);
+					if (featureData) {
+						parts.push(`### ${featureData.name}\n`);
+						if (featureData.entries) {
+							parts.push(this._renderEntries(featureData.entries) + "\n");
+						}
+					}
+				}
+			}
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Find a class feature by its reference string
+	 */
+	_findClassFeature(featureName, classData) {
+		if (!classData?.classFeature) return null;
+
+		// Parse the feature reference - handles two formats:
+		// PHB format: "Feature Name|ClassName||Level|Source"
+		// XPHB format: "Feature Name|ClassName|Source|Level"
+		const parts = featureName.split("|");
+		const name = parts[0];
+		const className = parts[1];
+
+		// Determine format by checking if part 2 is empty (PHB) or has content (XPHB)
+		let level, source;
+		if (parts[2] === "") {
+			// PHB format
+			level = parts[3] ? parseInt(parts[3]) : null;
+			source = parts[4];
+		} else {
+			// XPHB format
+			source = parts[2];
+			level = parts[3] ? parseInt(parts[3]) : null;
+		}
+
+		return classData.classFeature.find(f =>
+			f.name === name &&
+			f.className === className &&
+			(!level || f.level === level) &&
+			(!source || f.source === source)
+		);
+	}
+
+	/**
+	 * Format subclass content
+	 */
+	_formatSubclass(subclass, classData) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${subclass.name}\n`);
+
+		// Class info
+		if (subclass.className) {
+			parts.push(`**Class:** [[classes/${subclass.className} (${subclass.classSource})|${subclass.className}]]\n`);
+		}
+
+		// Subclass features table (if has features at multiple levels)
+		if (subclass.subclassFeatures && subclass.subclassFeatures.length > 1) {
+			parts.push(this._renderSubclassTable(subclass) + "\n");
+		}
+
+		// Detailed Subclass Features
+		if (subclass.subclassFeatures && subclass.subclassFeatures.length && classData?.subclassFeature) {
+			parts.push(this._renderSubclassFeatureDetails(subclass, classData) + "\n");
+		}
+
+		// Source
+		if (subclass.source) {
+			const sourceFull = Parser.sourceJsonToFull(subclass.source);
+			const pageStr = subclass.page ? `, page ${subclass.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Render subclass features table
+	 */
+	_renderSubclassTable(subclass) {
+		const parts = [`## ${subclass.name} Features\n`];
+
+		// Build table
+		parts.push(`| Level | Feature |`);
+		parts.push(`| --- | --- |`);
+
+		// Add rows for each subclass feature
+		for (const feature of subclass.subclassFeatures) {
+			const featureName = typeof feature === "string" ? feature : feature.subclassFeature;
+			const match = featureName.match(/\|(\d+)(?:\||$)/);
+			const level = match ? parseInt(match[1]) : null;
+
+			if (level) {
+				const displayName = featureName.split("|")[0];
+				parts.push(`| ${level} | [[#${displayName}|${displayName}]] |`);
+			}
+		}
+
+		parts.push("");
+		return parts.join("\n");
+	}
+
+	/**
+	 * Render detailed subclass feature descriptions (organized by level)
+	 */
+	_renderSubclassFeatureDetails(subclass, classData) {
+		const parts = [];
+
+		// Group features by level
+		const featuresByLevel = {};
+		for (const feature of subclass.subclassFeatures) {
+			const featureName = typeof feature === "string" ? feature : feature.subclassFeature;
+			const match = featureName.match(/\|(\d+)(?:\||$)/);
+			const level = match ? parseInt(match[1]) : null;
+
+			if (level) {
+				if (!featuresByLevel[level]) featuresByLevel[level] = [];
+				featuresByLevel[level].push(featureName);
+			}
+		}
+
+		// Render each level's features
+		for (const level of Object.keys(featuresByLevel).sort((a, b) => parseInt(a) - parseInt(b))) {
+			parts.push(`## Level ${level}\n`);
+
+			for (const featureName of featuresByLevel[level]) {
+				const featureData = this._findSubclassFeature(featureName, classData);
+
+				if (featureData) {
+					// Feature heading
+					parts.push(`### ${featureData.name}\n`);
+
+					// Feature description
+					if (featureData.entries) {
+						parts.push(this._renderEntries(featureData.entries) + "\n");
+					}
+				}
+			}
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Find a subclass feature by its reference string
+	 */
+	_findSubclassFeature(featureName, classData) {
+		if (!classData?.subclassFeature) return null;
+
+		// Parse the feature reference - handles multiple formats:
+		// PHB format (6 parts): "Feature Name|ClassName||SubclassName||Level|Source"
+		// XPHB format (6 parts): "Feature Name|ClassName|Source|SubclassName|Source|Level"
+		// Extended format (7 parts): "Feature Name|ClassName|ClassSource|SubclassName|SubclassSource|Level|Source"
+		const parts = featureName.split("|");
+		const name = parts[0];
+		const className = parts[1];
+
+		let subclassShortName, level, source, classSource, subclassSource;
+
+		if (parts.length === 7) {
+			// Extended format with both classSource and subclassSource
+			classSource = parts[2];
+			subclassShortName = parts[3];
+			subclassSource = parts[4];
+			level = parts[5] ? parseInt(parts[5]) : null;
+			source = parts[6];
+		} else if (parts[2] === "") {
+			// PHB format
+			subclassShortName = parts[3];
+			level = parts[5] ? parseInt(parts[5]) : null;
+			source = parts[6];
+		} else {
+			// XPHB format
+			source = parts[2];
+			subclassShortName = parts[3];
+			level = parts[5] ? parseInt(parts[5]) : null;
+		}
+
+		return classData.subclassFeature.find(f =>
+			f.name === name &&
+			f.className === className &&
+			f.subclassShortName === subclassShortName &&
+			(!level || f.level === level) &&
+			(!source || f.source === source) &&
+			(!classSource || f.classSource === classSource) &&
+			(!subclassSource || f.subclassSource === subclassSource)
+		);
 	}
 
 	/**
@@ -1482,6 +2217,570 @@ class MarkdownFormatter {
 		const entriesToRender = entry._fullEntries || entry.entries;
 		if (entriesToRender) {
 			parts.push(this._renderEntries(entriesToRender));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format subrace content
+	 */
+	_formatSubrace(entry) {
+		const parts = [];
+
+		// Title - include base race name
+		const fullName = entry.raceName ? `${entry.name} ${entry.raceName}` : entry.name;
+		parts.push(`# ${fullName}\n`);
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format language content
+	 */
+	_formatLanguage(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Type
+		if (entry.type) {
+			const typeMap = {
+				'standard': 'Standard Language',
+				'exotic': 'Exotic Language',
+				'rare': 'Rare Language',
+				'secret': 'Secret Language'
+			};
+			const typeStr = typeMap[entry.type] || entry.type;
+			parts.push(`*${typeStr}*\n`);
+		}
+
+		// Origin
+		if (entry.origin) {
+			parts.push(`**Origin:** ${entry.origin}\n`);
+		}
+
+		// Script
+		if (entry.script) {
+			parts.push(`**Script:** ${entry.script}\n`);
+		}
+
+		// Typical Speakers
+		if (entry.typicalSpeakers && entry.typicalSpeakers.length > 0) {
+			const speakers = entry.typicalSpeakers.map(s => this._renderString(s)).join(", ");
+			parts.push(`**Typical Speakers:** ${speakers}\n`);
+		}
+
+		// Description (if exists)
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format deity content
+	 */
+	_formatDeity(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Title/epithet
+		if (entry.title) {
+			parts.push(`*${entry.title}*\n`);
+		}
+
+		// Alignment
+		if (entry.alignment) {
+			const alignmentStr = Parser.alignmentListToFull(entry.alignment);
+			parts.push(`**Alignment:** ${alignmentStr}\n`);
+		}
+
+		// Domains
+		if (entry.domains && entry.domains.length > 0) {
+			parts.push(`**Domains:** ${entry.domains.join(", ")}\n`);
+		}
+
+		// Pantheon
+		if (entry.pantheon) {
+			parts.push(`**Pantheon:** ${entry.pantheon}\n`);
+		}
+
+		// Province
+		if (entry.province) {
+			parts.push(`**Province:** ${entry.province}\n`);
+		}
+
+		// Symbol
+		if (entry.symbol) {
+			parts.push(`**Symbol:** ${entry.symbol}\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push("\n" + this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format object content
+	 */
+	_formatObject(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Size and Type
+		const typeInfo = [];
+		if (entry.size) {
+			const sizeMap = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
+			const sizes = Array.isArray(entry.size) ? entry.size : [entry.size];
+			typeInfo.push(sizes.map(s => sizeMap[s] || s).join(" or "));
+		}
+		if (entry.objectType) {
+			const typeMap = {
+				'SW': 'siege weapon',
+				'SPC': 'space object',
+				'VEH': 'vehicle'
+			};
+			typeInfo.push(typeMap[entry.objectType] || entry.objectType);
+		}
+		if (typeInfo.length) {
+			parts.push(`*${typeInfo.join(" ")}*\n`);
+		}
+
+		// Stats
+		const stats = [];
+		if (entry.ac !== undefined) {
+			const ac = typeof entry.ac === 'object' ? entry.ac.ac : entry.ac;
+			stats.push(`**Armor Class** ${ac}`);
+		}
+		if (entry.hp !== undefined) {
+			const hp = typeof entry.hp === 'object' ? entry.hp.hp : entry.hp;
+			stats.push(`**Hit Points** ${hp}`);
+		}
+		if (stats.length) {
+			parts.push(stats.join("  \n") + "\n");
+		}
+
+		// Immunities
+		if (entry.immune && entry.immune.length > 0) {
+			parts.push(`**Damage Immunities** ${entry.immune.join(", ")}\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries) + "\n");
+		}
+
+		// Actions
+		if (entry.actionEntries && entry.actionEntries.length > 0) {
+			parts.push("## Actions\n");
+			for (const action of entry.actionEntries) {
+				if (action.name) {
+					parts.push(`### ${this._renderString(action.name)}\n`);
+				}
+				if (action.entries) {
+					parts.push(this._renderEntries(action.entries) + "\n");
+				}
+			}
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format psionic entry content
+	 */
+	_formatPsionic(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Type and Order (for disciplines)
+		const typeInfo = [];
+		if (entry.type) {
+			const typeMap = {'D': 'Psionic Discipline', 'T': 'Psionic Talent'};
+			typeInfo.push(typeMap[entry.type] || entry.type);
+		}
+		if (entry.order) {
+			typeInfo.push(`(${entry.order})`);
+		}
+		if (typeInfo.length) {
+			parts.push(`*${typeInfo.join(" ")}*\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries) + "\n");
+		}
+
+		// Psychic Focus (only for disciplines)
+		if (entry.focus) {
+			parts.push(`## Psychic Focus\n`);
+			parts.push(`${this._renderString(entry.focus)}\n`);
+		}
+
+		// Modes (only for disciplines)
+		if (entry.modes && entry.modes.length > 0) {
+			parts.push(`## Discipline Modes\n`);
+			for (const mode of entry.modes) {
+				if (mode.name) {
+					// Mode name with cost
+					let modeName = mode.name;
+					if (mode.cost) {
+						const costStr = mode.cost.min === mode.cost.max
+							? `${mode.cost.min} psi`
+							: `${mode.cost.min}-${mode.cost.max} psi`;
+						modeName += ` (${costStr})`;
+					}
+					parts.push(`### ${this._renderString(modeName)}\n`);
+				}
+
+				// Concentration
+				if (mode.concentration) {
+					const duration = mode.concentration.duration;
+					const unit = mode.concentration.unit;
+					parts.push(`*Concentration, up to ${duration} ${unit}*\n`);
+				}
+
+				// Mode description
+				if (mode.entries) {
+					parts.push(this._renderEntries(mode.entries) + "\n");
+				}
+			}
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format reward entry content
+	 */
+	_formatReward(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Reward type
+		if (entry.type) {
+			parts.push(`*${entry.type}*\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries) + "\n");
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format table entry content
+	 */
+	_formatTable(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Caption (if different from name)
+		if (entry.caption && entry.caption !== entry.name) {
+			parts.push(`*${entry.caption}*\n`);
+		}
+
+		// Render the table
+		if (entry.colLabels && entry.rows) {
+			// Header row
+			const headers = entry.colLabels.join(" | ");
+			parts.push(`| ${headers} |`);
+
+			// Separator row
+			const separators = entry.colLabels.map(() => "---").join(" | ");
+			parts.push(`| ${separators} |`);
+
+			// Data rows
+			for (const row of entry.rows) {
+				// Process each cell through _renderString to convert tags to wikilinks
+				const cells = row.map(cell => {
+					if (typeof cell === 'string') {
+						return this._renderString(cell);
+					} else if (typeof cell === 'object' && cell.type === 'cell') {
+						// Handle cell objects (used for complex cells with entries)
+						if (cell.entry) {
+							return this._renderString(cell.entry);
+						} else if (cell.entries) {
+							return this._renderEntries(cell.entries);
+						}
+					}
+					return String(cell);
+				});
+				parts.push(`| ${cells.join(" | ")} |`);
+			}
+
+			parts.push(""); // Empty line after table
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format vehicle entry content
+	 */
+	_formatVehicle(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Vehicle type and size
+		const typeInfo = [];
+		if (entry.vehicleType) {
+			const vehicleTypeMap = {
+				'SHIP': 'Ship',
+				'SPELLJAMMER': 'Spelljammer',
+				'INFWAR': 'Infernal War Machine',
+				'CREATURE': 'Creature',
+				'OBJECT': 'Object',
+				'ELEMENTAL_AIRSHIP': 'Elemental Airship'
+			};
+			typeInfo.push(vehicleTypeMap[entry.vehicleType] || entry.vehicleType);
+		}
+		if (entry.size) {
+			const sizeMap = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
+			const sizes = Array.isArray(entry.size) ? entry.size : [entry.size];
+			typeInfo.push(sizes.map(s => sizeMap[s] || s).join(" or "));
+		}
+		if (typeInfo.length) {
+			parts.push(`*${typeInfo.join(", ")}*\n`);
+		}
+
+		// Dimensions and pace (for ships)
+		const shipInfo = [];
+		if (entry.dimensions) {
+			shipInfo.push(`**Dimensions:** ${entry.dimensions.join(" × ")}`);
+		}
+		if (entry.pace !== undefined) {
+			shipInfo.push(`**Travel Pace:** ${entry.pace} miles per hour`);
+		}
+		// Crew capacity (capCreature for infernal war machines, capCrew for ships)
+		if (entry.capCreature !== undefined) {
+			shipInfo.push(`**Crew Capacity:** ${entry.capCreature}`);
+		}
+		// Cargo capacity - tons for ships, pounds for infernal war machines
+		if (entry.capCargo !== undefined) {
+			const isShip = entry.vehicleType === 'SHIP' || entry.vehicleType === 'SPELLJAMMER';
+			const unit = isShip ? 'tons' : 'lb.';
+			shipInfo.push(`**Cargo Capacity:** ${entry.capCargo} ${unit}`);
+		}
+		if (shipInfo.length) {
+			parts.push(shipInfo.join("  \n") + "\n");
+		}
+
+		// Ability scores (for ships/creatures)
+		if (entry.str !== undefined || entry.dex !== undefined || entry.con !== undefined) {
+			const abilities = [];
+			if (entry.str !== undefined) abilities.push(`**STR** ${entry.str}`);
+			if (entry.dex !== undefined) abilities.push(`**DEX** ${entry.dex}`);
+			if (entry.con !== undefined) abilities.push(`**CON** ${entry.con}`);
+			if (entry.int !== undefined) abilities.push(`**INT** ${entry.int}`);
+			if (entry.wis !== undefined) abilities.push(`**WIS** ${entry.wis}`);
+			if (entry.cha !== undefined) abilities.push(`**CHA** ${entry.cha}`);
+			if (abilities.length) {
+				parts.push(abilities.join(", ") + "\n");
+			}
+		}
+
+		// Condition immunities
+		if (entry.conditionImmune && entry.conditionImmune.length > 0) {
+			parts.push(`**Condition Immunities** ${entry.conditionImmune.join(", ")}\n`);
+		}
+
+		// Description from entries
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries) + "\n");
+		}
+
+		// Hull (for ships)
+		if (entry.hull) {
+			parts.push(`## Hull\n`);
+			const hullStats = [];
+			if (entry.hull.ac !== undefined) hullStats.push(`**Armor Class:** ${entry.hull.ac}`);
+			if (entry.hull.hp !== undefined) hullStats.push(`**Hit Points:** ${entry.hull.hp}`);
+			if (entry.hull.dt !== undefined) hullStats.push(`**Damage Threshold:** ${entry.hull.dt}`);
+			parts.push(hullStats.join("  \n") + "\n");
+		}
+
+		// Control (for ships - helm)
+		if (entry.control && entry.control.length > 0) {
+			parts.push(`## Control\n`);
+			for (const ctrl of entry.control) {
+				if (ctrl.name) {
+					parts.push(`### ${this._renderString(ctrl.name)}\n`);
+				}
+				const ctrlStats = [];
+				if (ctrl.ac !== undefined) ctrlStats.push(`**Armor Class:** ${ctrl.ac}`);
+				if (ctrl.hp !== undefined) ctrlStats.push(`**Hit Points:** ${ctrl.hp}`);
+				if (ctrlStats.length) {
+					parts.push(ctrlStats.join("  \n") + "\n");
+				}
+				if (ctrl.entries) {
+					parts.push(this._renderEntries(ctrl.entries) + "\n");
+				}
+			}
+		}
+
+		// Movement (for ships - oars, sails)
+		if (entry.movement && entry.movement.length > 0) {
+			parts.push(`## Movement\n`);
+			for (const move of entry.movement) {
+				if (move.name) {
+					parts.push(`### ${this._renderString(move.name)}\n`);
+				}
+				const moveStats = [];
+				if (move.ac !== undefined) moveStats.push(`**Armor Class:** ${move.ac}`);
+				if (move.hp !== undefined) moveStats.push(`**Hit Points:** ${move.hp}`);
+				if (move.hpNote) moveStats.push(`(${move.hpNote})`);
+				if (moveStats.length) {
+					parts.push(moveStats.join(" ") + "\n");
+				}
+				if (move.speed) {
+					for (const spd of move.speed) {
+						if (spd.entries) {
+							parts.push(`**Speed (${spd.mode}):** ${spd.entries.join(", ")}\n`);
+						}
+					}
+				}
+				if (move.entries) {
+					parts.push(this._renderEntries(move.entries) + "\n");
+				}
+			}
+		}
+
+		// Weapons (for ships - ballistas, mangonels, naval ram)
+		if (entry.weapon && entry.weapon.length > 0) {
+			parts.push(`## Weapons\n`);
+			for (const weapon of entry.weapon) {
+				if (weapon.name) {
+					let weaponName = this._renderString(weapon.name);
+					if (weapon.count && weapon.count > 1) {
+						weaponName = `${weapon.count} ${weaponName}`;
+					}
+					parts.push(`### ${weaponName}\n`);
+				}
+				const weaponStats = [];
+				if (weapon.ac !== undefined) weaponStats.push(`**Armor Class:** ${weapon.ac}`);
+				if (weapon.hp !== undefined) weaponStats.push(`**Hit Points:** ${weapon.hp}`);
+				if (weapon.dt !== undefined) weaponStats.push(`**Damage Threshold:** ${weapon.dt}`);
+				if (weaponStats.length) {
+					parts.push(weaponStats.join("  \n") + "\n");
+				}
+				if (weapon.entries) {
+					parts.push(this._renderEntries(weapon.entries) + "\n");
+				}
+			}
+		}
+
+		// Actions
+		if (entry.action) {
+			parts.push(`## Actions\n`);
+			parts.push(this._renderEntries(entry.action) + "\n");
+		}
+
+		// Traits (for infernal war machines)
+		if (entry.trait && entry.trait.length > 0) {
+			parts.push(`## Traits\n`);
+			for (const trait of entry.trait) {
+				if (trait.name) {
+					parts.push(`### ${this._renderString(trait.name)}\n`);
+				}
+				if (trait.entries) {
+					parts.push(this._renderEntries(trait.entries) + "\n");
+				}
+			}
+		}
+
+		// Action Stations (for infernal war machines)
+		if (entry.actionStation && entry.actionStation.length > 0) {
+			parts.push(`## Action Stations\n`);
+			for (const station of entry.actionStation) {
+				if (station.name) {
+					parts.push(`### ${this._renderString(station.name)}\n`);
+				}
+				if (station.entries) {
+					parts.push(this._renderEntries(station.entries) + "\n");
+				}
+			}
 		}
 
 		// Source
@@ -1529,12 +2828,66 @@ class MarkdownFormatter {
 	}
 
 	/**
+	 * Render a string that may contain tags like {@recharge 5}
+	 */
+	_renderString(str) {
+		if (!str) return "";
+		const textStack = [""];
+		this.renderer.recursiveRender(str, textStack, {depth: 0});
+		return textStack[0].trim();
+	}
+
+	/**
 	 * Get ordinal suffix for numbers
 	 */
 	_getOrdinalSuffix(n) {
 		const s = ["th", "st", "nd", "rd"];
 		const v = n % 100;
 		return s[(v - 20) % 10] || s[v] || s[0];
+	}
+
+	/**
+	 * Look up legendary group data for a monster
+	 */
+	_getLegendaryGroup(legendaryGroupRef) {
+		if (!legendaryGroupRef || !this.legendaryGroupMap) {
+			return null;
+		}
+		const key = `${legendaryGroupRef.name}|${legendaryGroupRef.source}`.toLowerCase();
+		return this.legendaryGroupMap.get(key);
+	}
+
+	/**
+	 * Calculate initiative bonus for a monster
+	 * Based on Renderer.monster.getInitiativeBonusNumber from render.js
+	 */
+	_getInitiativeBonus(mon) {
+		// If no initiative field and no dex, or dex is special, return null
+		if (mon.initiative == null && (mon.dex == null || (typeof mon.dex === "object" && mon.dex.special))) {
+			return null;
+		}
+		// If no initiative field, use DEX modifier
+		if (mon.initiative == null) {
+			return Parser.getAbilityModNumber(mon.dex);
+		}
+		// If initiative is a direct number, use it
+		if (typeof mon.initiative === "number") {
+			return mon.initiative;
+		}
+		// If initiative is not an object, return null
+		if (typeof mon.initiative !== "object") {
+			return null;
+		}
+		// If initiative object has a direct initiative value, use it
+		if (typeof mon.initiative.initiative === "number") {
+			return mon.initiative.initiative;
+		}
+		// Calculate with proficiency bonus (expertise)
+		if (mon.dex == null) return null;
+		const profBonus = mon.initiative.proficiency
+			? mon.initiative.proficiency * Parser.crToPb(typeof mon.cr === "object" ? mon.cr.cr : mon.cr)
+			: 0;
+		return Parser.getAbilityModNumber(mon.dex) + profBonus;
 	}
 }
 
@@ -1570,9 +2923,22 @@ class MarkdownExportEngine {
 			console.warn("Failed to load spell-class lookup, classes won't be added to spells:", e.message);
 		}
 
+		// Load legendary groups data (for lair actions, regional effects)
+		this.legendaryGroups = null;
+		try {
+			const legendaryPath = path.join(this.dataDir, "bestiary", "legendarygroups.json");
+			if (fs.existsSync(legendaryPath)) {
+				const data = readJson(legendaryPath);
+				this.legendaryGroups = data.legendaryGroup || [];
+				this.log("Loaded legendary groups data");
+			}
+		} catch (e) {
+			console.warn("Failed to load legendary groups, lair actions/regional effects won't be added:", e.message);
+		}
+
 		// Initialize generators with loaded data
 		this.frontmatterGenerator = new FrontmatterGenerator(this.spellClassLookup);
-		this.formatter = new MarkdownFormatter(this.renderer);
+		this.formatter = new MarkdownFormatter(this.renderer, this.legendaryGroups);
 	}
 
 	/**
@@ -1588,6 +2954,7 @@ class MarkdownExportEngine {
 		background: {dir: "backgrounds"},
 		feat: {dir: "feats"},
 		race: {dir: "races"},
+		subrace: {dir: "races"},
 		condition: {dir: "conditions"},
 		disease: {dir: "conditions"},
 		deity: {dir: "deities"},
@@ -1672,7 +3039,19 @@ class MarkdownExportEngine {
 				for (const entry of entries) {
 				// Skip entries without required content fields
 				// (e.g., foundry-*.json files often have metadata-only entries)
+				if (entryType === "class" && !entry.classFeatures) {
+					this.log(`  Skipping ${entry.name} from ${entry.source}: no classFeatures field (likely foundry data)`);
+					continue;
+				}
+				if (entryType === "subclass" && !entry.subclassFeatures) {
+					this.log(`  Skipping ${entry.name} from ${entry.source}: no subclassFeatures field (likely foundry data)`);
+					continue;
+				}
 				if (entryType === "feat" && !entry.entries) {
+					this.log(`  Skipping ${entry.name} from ${entry.source}: no entries field`);
+					continue;
+				}
+				if ((entryType === "race" || entryType === "subrace") && !entry.entries) {
 					this.log(`  Skipping ${entry.name} from ${entry.source}: no entries field`);
 					continue;
 				}
@@ -1714,9 +3093,31 @@ class MarkdownExportEngine {
 	async exportEntry(changeEntry, sourceFile, fileHash) {
 		const {entryType, entry, entryKey, entryHash, reason} = changeEntry;
 
+		// Skip _copy reference entries (these are just pointers to reprints)
+		if (entry._copy) {
+			this.log(`  Skipping ${entry.name} from ${entry.source}: _copy reference`);
+			this.stats.skipped++;
+			return;
+		}
+
 		// Skip entries without required content fields
 		// (e.g., foundry-*.json files often have metadata-only entries)
+		if (entryType === "class" && !entry.classFeatures) {
+			this.log(`  Skipping ${entry.name} from ${entry.source}: no classFeatures field (likely foundry data)`);
+			this.stats.skipped++;
+			return;
+		}
+		if (entryType === "subclass" && !entry.subclassFeatures) {
+			this.log(`  Skipping ${entry.name} from ${entry.source}: no subclassFeatures field (likely foundry data)`);
+			this.stats.skipped++;
+			return;
+		}
 		if (entryType === "feat" && !entry.entries) {
+			this.log(`  Skipping ${entry.name} from ${entry.source}: no entries field`);
+			this.stats.skipped++;
+			return;
+		}
+		if ((entryType === "race" || entryType === "subrace") && !entry.entries) {
 			this.log(`  Skipping ${entry.name} from ${entry.source}: no entries field`);
 			this.stats.skipped++;
 			return;
@@ -1731,7 +3132,12 @@ class MarkdownExportEngine {
 		}
 
 		// Generate filename
-		const filename = this._sanitizeFilename(`${entry.name} (${entry.source || "Unknown"}).md`);
+		// For subraces, include the base race name
+		let displayName = entry.name;
+		if (entryType === "subrace" && entry.raceName) {
+			displayName = `${entry.name} ${entry.raceName}`;
+		}
+		const filename = this._sanitizeFilename(`${displayName} (${entry.source || "Unknown"}).md`);
 		const outputPath = path.join(this.outputDir, resourceInfo.dir, filename);
 
 		// Ensure directory exists
@@ -1744,7 +3150,14 @@ class MarkdownExportEngine {
 		const frontmatter = this.frontmatterGenerator.generate(entry, entryType, entryHash);
 
 		// Generate markdown content
-		const markdown = this.formatter.format(entry, entryType, frontmatter);
+		// For classes and subclasses, pass the full file data for accessing features
+		let markdown;
+		if (entryType === "class" || entryType === "subclass") {
+			const fullData = readJson(sourceFile);
+			markdown = this.formatter.format(entry, entryType, frontmatter, fullData);
+		} else {
+			markdown = this.formatter.format(entry, entryType, frontmatter);
+		}
 
 		// Write file
 		fs.writeFileSync(outputPath, markdown, "utf8");

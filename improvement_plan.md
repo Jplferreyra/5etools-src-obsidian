@@ -6,24 +6,24 @@
 - [x] **Spells** - Add available classes, higher-level spell slots info ✅
 - [x] **Items** - Add item type, fix missing descriptions ✅
 - [x] **Feats** - Add type, origin, fighting style properties ✅
-- [ ] **Species/Races** - Add sub-races support
+- [x] **Species/Races** - Add sub-races support
 - [ ] **Monsters** - Investigate and fix reported issues
 
 ### Batch 2 - Character Creation (Priority 2-3)
 - [ ] **Classes** - Improve poor output quality
 - [ ] **Subclasses** - Implement proper formatting
-- [ ] **Actions** - Implement proper formatting
-- [ ] **Optional Features** - Implement proper formatting
+- [x] **Actions** - Implement proper formatting
+- [x] **Optional Features** - Implement proper formatting
 
 ### Batch 3 - Reference & Rare (Priority 4-5)
 - [ ] **Tables** - Implement proper formatting
-- [ ] **Languages** - Add type and description
-- [ ] **Deities** - Implement proper formatting
-- [ ] **Rewards** - Add type property
-- [ ] **Objects** - Add AC and other stats
+- [x] **Languages** - Add type and description
+- [x] **Deities** - Implement proper formatting
+- [x] **Rewards** - Add type property
+- [x] **Objects** - Add AC and other stats
 - [ ] **Vehicles** - Implement proper formatting
-- [ ] **Psionics** - Implement proper formatting
-- [ ] **Variant Rules** - Implement proper formatting
+- [x] **Psionics** - Implement proper formatting
+- [x] **Variant Rules** - Implement proper formatting
 
 ### Already Working ✅
 - ✅ **Backgrounds** - Working correctly
