@@ -20,31 +20,31 @@ class ObsidianMarkdownRenderer extends RendererMarkdown {
 	}
 
 	static TAG_TO_DIR_MAP = {
-		"@spell": "spells",
-		"@item": "items",
-		"@creature": "monsters",
-		"@monster": "monsters",
-		"@background": "backgrounds",
-		"@class": "classes",
-		"@subclass": "subclasses",
-		"@race": "races",
-		"@feat": "feats",
-		"@condition": "conditions",
-		"@disease": "conditions",
-		"@deity": "deities",
-		"@action": "actions",
-		"@vehicle": "vehicles",
-		"@object": "objects",
-		"@optionalfeature": "optional-features",
-		"@reward": "rewards",
-		"@psionic": "psionics",
-		"@variantrule": "variant-rules",
-		"@table": "tables",
-		"@language": "languages",
-		"@trap": "traps-hazards",
-		"@hazard": "traps-hazards",
-		"@cult": "cults-boons",
-		"@boon": "cults-boons",
+		"@spell": "Spells",
+		"@item": "Items",
+		"@creature": "Bestiary",
+		"@monster": "Bestiary",
+		"@background": "Backgrounds",
+		"@class": "Classes",  // Note: actual path determined dynamically for hierarchy
+		"@subclass": "Classes",  // Note: actual path determined dynamically for hierarchy
+		"@race": "Races",
+		"@feat": "Feats",
+		"@condition": "Rules/Conditions",
+		"@disease": "Rules/Conditions",
+		"@deity": "Deities",
+		"@action": "Actions",
+		"@vehicle": "Vehicles",
+		"@object": "Objects",
+		"@optionalfeature": "Optional Features",
+		"@reward": "Rewards",
+		"@psionic": "Psionics",
+		"@variantrule": "Rules/Variant Rules",
+		"@table": "Tables",
+		"@language": "Languages",
+		"@trap": "Traps Hazards",
+		"@hazard": "Traps Hazards",
+		"@cult": "Cults Boons",
+		"@boon": "Cults Boons",
 	};
 
 	/**
@@ -69,10 +69,23 @@ class ObsidianMarkdownRenderer extends RendererMarkdown {
 		const cleanName = this._cleanName(name);
 		const cleanSource = source.toUpperCase();
 
-		// Generate wikilink: ALWAYS include display text [[resourceDir/Name (SOURCE)|Display Text]]
+		// Generate wikilink path - special handling for class hierarchy
 		const filename = `${cleanName} (${cleanSource})`;
-		const wikilink = `[[${resourceDir}/${filename}|${filename}]]`;
+		let wikilinkPath;
 
+		if (tag === "@class") {
+			// Classes are in: Classes/{ClassName}/{ClassName} ({Source}).md
+			wikilinkPath = `Classes/${cleanName}/${filename}`;
+		} else if (tag === "@subclass") {
+			// Subclasses need parent class info which we don't have in the tag
+			// Use just the filename - Obsidian will find it by name
+			wikilinkPath = filename;
+		} else {
+			// Standard path for other resource types
+			wikilinkPath = `${resourceDir}/${filename}`;
+		}
+
+		const wikilink = `[[${wikilinkPath}|${filename}]]`;
 		textStack[0] += wikilink;
 	}
 
@@ -328,8 +341,14 @@ class FrontmatterGenerator {
 	_generateBase(entry, entryType, entryHash) {
 		const tags = this._generateTags(entry, entryType);
 
+		// Special handling for itemProperty where name is nested
+		let name = entry.name || "Unknown";
+		if (entryType === "itemProperty") {
+			name = entry.entries?.[0]?.name || "Unknown Property";
+		}
+
 		return {
-			name: entry.name || "Unknown",
+			name,
 			source: entry.source || "Unknown",
 			page: entry.page,
 			type: entryType,
@@ -370,7 +389,55 @@ class FrontmatterGenerator {
 			tags.push(`dnd5e/item/rarity-${entry.rarity.toLowerCase()}`);
 		}
 
+		if (entryType === "optionalfeature" && entry.featureType) {
+			// Add tags for each feature type
+			entry.featureType.forEach(typeCode => {
+				const decoded = this._decodeFeatureType(typeCode);
+				// Create kebab-case tag from decoded name
+				const tagName = decoded.toLowerCase().replace(/[() ]/g, "-").replace(/--+/g, "-").replace(/^-|-$/g, "");
+				tags.push(`dnd5e/optionalfeature/${tagName}`);
+			});
+		}
+
 		return tags;
+	}
+
+	/**
+	 * Decode optional feature type codes
+	 * Returns human-readable feature type names
+	 */
+	_decodeFeatureType(typeCode) {
+		// Handle codes with colons (e.g., FS:F, MV:B)
+		const parts = typeCode.split(":");
+
+		const baseTypeMap = {
+			"AI": "Artificer Infusion",
+			"AS": "Arcane Shot",
+			"ED": "Elemental Discipline",
+			"EI": "Eldritch Invocation",
+			"FS": "Fighting Style",
+			"MM": "Metamagic",
+			"MV": "Maneuver",
+			"PB": "Pact Boon",
+			"RN": "Rune",
+			"RP": "Rune Power"
+		};
+
+		const subTypeMap = {
+			"B": "Barbarian",
+			"F": "Fighter",
+			"P": "Paladin",
+			"R": "Ranger"
+		};
+
+		const baseType = baseTypeMap[parts[0]] || parts[0];
+
+		// If there's a subtype, append it
+		if (parts.length === 2 && subTypeMap[parts[1]]) {
+			return `${baseType} (${subTypeMap[parts[1]]})`;
+		}
+
+		return baseType;
 	}
 
 	/**
@@ -1183,6 +1250,24 @@ class MarkdownFormatter {
 			case "vehicle":
 				content = this._formatVehicle(entry);
 				break;
+			case "sense":
+				content = this._formatSense(entry);
+				break;
+			case "status":
+				content = this._formatStatus(entry);
+				break;
+			case "itemProperty":
+				content = this._formatItemProperty(entry);
+				break;
+			case "itemMastery":
+				content = this._formatItemMastery(entry);
+				break;
+			case "vehicleUpgrade":
+				content = this._formatVehicleUpgrade(entry);
+				break;
+			case "facility":
+				content = this._formatFacility(entry);
+				break;
 			default:
 				content = this._formatGeneric(entry);
 				break;
@@ -1672,7 +1757,7 @@ class MarkdownFormatter {
 					const linkableProperties = ['Ammunition', 'Finesse', 'Heavy', 'Light', 'Loading', 'Range', 'Reach', 'Thrown', 'Two-Handed', 'Versatile'];
 					if (linkableProperties.includes(name) && source) {
 						const filename = `${name} (${source})`;
-						return `[[weapon-properties/${filename}|${filename}]]`;
+						return `[[Rules/Weapon Properties/${filename}|${filename}]]`;
 					}
 
 					return name;
@@ -1688,7 +1773,7 @@ class MarkdownFormatter {
 					const [masteryName, source] = masteryStr.split('|');
 					// Create wikilink to variant rule (will be exported later)
 					const filename = `${masteryName} (${source})`;
-					return `[[variant-rules/${filename}|${filename}]]`;
+					return `[[Rules/Variant Rules/${filename}|${filename}]]`;
 				}).join(", ");
 				propParts.push(`**Mastery:** ${masteryLinks}`);
 			}
@@ -1992,7 +2077,7 @@ class MarkdownFormatter {
 							.sort((a, b) => a.name.localeCompare(b.name));
 
 						for (const sc of subclasses) {
-							parts.push(`- [[subclasses/${sc.name} (${sc.source})|${sc.name}]]\n`);
+							parts.push(`- [[Classes/${cls.name}/Subclasses/${sc.name} (${sc.source})|${sc.name}]]\n`);
 						}
 						parts.push("");
 						subclassesListed = true;
@@ -2006,7 +2091,9 @@ class MarkdownFormatter {
 					if (featureData) {
 						parts.push(`### ${featureData.name}\n`);
 						if (featureData.entries) {
-							parts.push(this._renderEntries(featureData.entries) + "\n");
+							// Expand any refClassFeature entries before rendering
+							const expandedEntries = this._expandFeatureRefs(featureData.entries, classData);
+							parts.push(this._renderEntries(expandedEntries) + "\n");
 						}
 					}
 				}
@@ -2141,7 +2228,9 @@ class MarkdownFormatter {
 
 					// Feature description
 					if (featureData.entries) {
-						parts.push(this._renderEntries(featureData.entries) + "\n");
+						// Expand any refSubclassFeature entries before rendering
+						const expandedEntries = this._expandFeatureRefs(featureData.entries, classData);
+						parts.push(this._renderEntries(expandedEntries) + "\n");
 					}
 				}
 			}
@@ -2194,6 +2283,53 @@ class MarkdownFormatter {
 			(!classSource || f.classSource === classSource) &&
 			(!subclassSource || f.subclassSource === subclassSource)
 		);
+	}
+
+	/**
+	 * Expand feature references (refSubclassFeature, refClassFeature) in entries
+	 * Replaces reference entries with the actual feature content
+	 */
+	_expandFeatureRefs(entries, classData) {
+		if (!entries || !Array.isArray(entries)) return entries;
+
+		const expanded = [];
+
+		for (const entry of entries) {
+			// Handle refSubclassFeature
+			if (typeof entry === "object" && entry.type === "refSubclassFeature") {
+				const refString = entry.subclassFeature;
+				const feature = this._findSubclassFeature(refString, classData);
+
+				if (feature) {
+					// Add the feature as a nested heading with its content
+					expanded.push({
+						type: "entries",
+						name: feature.name,
+						entries: feature.entries || []
+					});
+				}
+			}
+			// Handle refClassFeature
+			else if (typeof entry === "object" && entry.type === "refClassFeature") {
+				const refString = entry.classFeature;
+				const feature = this._findClassFeature(refString, classData);
+
+				if (feature) {
+					// Add the feature as a nested heading with its content
+					expanded.push({
+						type: "entries",
+						name: feature.name,
+						entries: feature.entries || []
+					});
+				}
+			}
+			// Keep other entries as-is
+			else {
+				expanded.push(entry);
+			}
+		}
+
+		return expanded;
 	}
 
 	/**
@@ -2819,6 +2955,238 @@ class MarkdownFormatter {
 	}
 
 	/**
+	 * Format sense entry (Darkvision, Blindsight, etc.)
+	 */
+	_formatSense(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format status entry (Bloodied, Concentration, Surprised)
+	 */
+	_formatStatus(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format weapon property entry (Finesse, Two-Handed, Versatile, etc.)
+	 */
+	_formatItemProperty(entry) {
+		const parts = [];
+
+		// Title - use the name from nested entries
+		const propertyName = entry.entries?.[0]?.name || entry.name || "Unknown Property";
+		parts.push(`# ${propertyName}\n`);
+
+		// Abbreviation
+		if (entry.abbreviation) {
+			parts.push(`**Abbreviation:** ${entry.abbreviation}\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format weapon mastery entry (Cleave, Graze, Push, etc.)
+	 */
+	_formatItemMastery(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format vehicle upgrade entry
+	 */
+	_formatVehicleUpgrade(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Upgrade Type
+		if (entry.upgradeType && entry.upgradeType.length > 0) {
+			const decodedTypes = entry.upgradeType.map(type => this._decodeVehicleUpgradeType(type));
+			parts.push(`**Upgrade Type:** ${decodedTypes.join(", ")}\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Decode vehicle upgrade type codes
+	 * Format: PREFIX:SUFFIX where PREFIX is vehicle type and SUFFIX is upgrade category
+	 */
+	_decodeVehicleUpgradeType(typeCode) {
+		const parts = typeCode.split(":");
+		if (parts.length !== 2) return typeCode;
+
+		const vehicleTypes = {
+			"IWM": "Infernal War Machine",
+			"SHP": "Ship"
+		};
+
+		const upgradeCategories = {
+			"A": "Armor",
+			"F": "Figurehead",
+			"G": "Gadget",
+			"H": "Hull",
+			"M": "Movement",
+			"O": "Other",
+			"W": "Weapon"
+		};
+
+		const vehicleType = vehicleTypes[parts[0]] || parts[0];
+		const upgradeCategory = upgradeCategories[parts[1]] || parts[1];
+
+		return `${vehicleType} - ${upgradeCategory}`;
+	}
+
+	/**
+	 * Format facility entry (Bastion facilities)
+	 */
+	_formatFacility(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Facility Type
+		if (entry.facilityType) {
+			parts.push(`**Type:** ${entry.facilityType}\n`);
+		}
+
+		// Level
+		if (entry.level) {
+			parts.push(`**Level:** ${entry.level}\n`);
+		}
+
+		// Space
+		if (entry.space && entry.space.length > 0) {
+			parts.push(`**Space:** ${entry.space.join(", ")}\n`);
+		}
+
+		// Prerequisites
+		if (entry.prerequisite && entry.prerequisite.length > 0) {
+			const prereqs = entry.prerequisite.map(prereq => {
+				if (typeof prereq === "string") return prereq;
+				if (prereq.facility) return `Facility: ${prereq.facility}`;
+				if (prereq.level) return `Level ${prereq.level}+`;
+				return JSON.stringify(prereq);
+			});
+			parts.push(`**Prerequisites:** ${prereqs.join(", ")}\n`);
+		}
+
+		// Hirelings
+		if (entry.hirelings && entry.hirelings.length > 0) {
+			const hirelingStrs = entry.hirelings.map(h => {
+				if (h.exact !== undefined) return `${h.exact}`;
+				if (h.min !== undefined && h.max !== undefined) return `${h.min}-${h.max}`;
+				if (h.min !== undefined) return `${h.min}+`;
+				if (h.max !== undefined) return `up to ${h.max}`;
+				return "varies";
+			});
+			parts.push(`**Hirelings:** ${hirelingStrs.join(", ")}\n`);
+		}
+
+		// Orders
+		if (entry.orders && entry.orders.length > 0) {
+			const orderNames = entry.orders.map(order => {
+				// Capitalize first letter
+				return order.charAt(0).toUpperCase() + order.slice(1);
+			});
+			parts.push(`**Available Orders:** ${orderNames.join(", ")}\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
 	 * Render entry content using the markdown renderer
 	 */
 	_renderEntries(entries) {
@@ -2946,32 +3314,38 @@ class MarkdownExportEngine {
 	 * Resource type mapping
 	 */
 	static RESOURCE_TYPE_MAP = {
-		spell: {dir: "spells"},
-		monster: {dir: "monsters"},
-		item: {dir: "items"},
-		baseitem: {dir: "items"},
-		class: {dir: "classes"},
-		subclass: {dir: "subclasses"},
-		background: {dir: "backgrounds"},
-		feat: {dir: "feats"},
-		race: {dir: "races"},
-		subrace: {dir: "races"},
-		condition: {dir: "conditions"},
-		disease: {dir: "conditions"},
-		deity: {dir: "deities"},
-		action: {dir: "actions"},
-		vehicle: {dir: "vehicles"},
-		object: {dir: "objects"},
-		optionalfeature: {dir: "optional-features"},
-		reward: {dir: "rewards"},
-		psionic: {dir: "psionics"},
-		variantrule: {dir: "variant-rules"},
-		table: {dir: "tables"},
-		language: {dir: "languages"},
-		trap: {dir: "traps-hazards"},
-		hazard: {dir: "traps-hazards"},
-		cult: {dir: "cults-boons"},
-		boon: {dir: "cults-boons"},
+		spell: {dir: "Spells"},
+		monster: {dir: "Bestiary"},
+		item: {dir: "Items"},
+		baseitem: {dir: "Items"},
+		class: {dir: "Classes"},  // Note: actual path determined dynamically for hierarchy
+		subclass: {dir: "Classes"},  // Note: actual path determined dynamically for hierarchy
+		background: {dir: "Backgrounds"},
+		feat: {dir: "Feats"},
+		race: {dir: "Races"},
+		subrace: {dir: "Races"},
+		condition: {dir: "Rules/Conditions"},
+		disease: {dir: "Rules/Conditions"},
+		deity: {dir: "Deities"},
+		action: {dir: "Actions"},
+		vehicle: {dir: "Vehicles"},
+		vehicleUpgrade: {dir: "Vehicles/Vehicle Upgrades"},
+		object: {dir: "Objects"},
+		optionalfeature: {dir: "Optional Features"},
+		reward: {dir: "Rewards"},
+		psionic: {dir: "Psionics"},
+		variantrule: {dir: "Rules/Variant Rules"},
+		sense: {dir: "Rules/Senses"},
+		status: {dir: "Rules/Conditions"},
+		itemProperty: {dir: "Rules/Weapon Properties"},
+		itemMastery: {dir: "Rules/Weapon Mastery"},
+		table: {dir: "Tables"},
+		language: {dir: "Languages"},
+		trap: {dir: "Traps Hazards"},
+		hazard: {dir: "Traps Hazards"},
+		cult: {dir: "Cults Boons"},
+		boon: {dir: "Cults Boons"},
+		facility: {dir: "Facilities"},
 	};
 
 	/**
@@ -3012,6 +3386,35 @@ class MarkdownExportEngine {
 		console.log(`  Errors: ${this.stats.errors}`);
 
 		return this.stats;
+	}
+
+	/**
+	 * Get folder name for optional feature type
+	 * Returns the plural folder name for a given feature type code
+	 */
+	_getOptionalFeatureFolder(featureTypeCodes) {
+		if (!featureTypeCodes || featureTypeCodes.length === 0) {
+			return "Other";
+		}
+
+		// Use the first feature type to determine folder
+		const typeCode = featureTypeCodes[0];
+		const parts = typeCode.split(":");
+
+		const folderMap = {
+			"AI": "Artificer Infusions",
+			"AS": "Arcane Shots",
+			"ED": "Elemental Disciplines",
+			"EI": "Eldritch Invocations",
+			"FS": "Fighting Styles",
+			"MM": "Metamagic",
+			"MV": "Maneuvers",
+			"PB": "Pact Boons",
+			"RN": "Runes",
+			"RP": "Rune Powers"
+		};
+
+		return folderMap[parts[0]] || "Other";
 	}
 
 	/**
@@ -3134,12 +3537,33 @@ class MarkdownExportEngine {
 
 		// Generate filename
 		// For subraces, include the base race name
+		// For itemProperty, the name is nested in entries[0].name
 		let displayName = entry.name;
 		if (entryType === "subrace" && entry.raceName) {
 			displayName = `${entry.name} ${entry.raceName}`;
+		} else if (entryType === "itemProperty") {
+			displayName = entry.entries?.[0]?.name || "Unknown Property";
 		}
 		const filename = this._sanitizeFilename(`${displayName} (${entry.source || "Unknown"}).md`);
-		const outputPath = path.join(this.outputDir, resourceInfo.dir, filename);
+
+		// Determine output path - special handling for class/subclass hierarchy and optional features
+		let outputPath;
+		if (entryType === "class") {
+			// Classes go in: Classes/{ClassName}/{ClassName} ({Source}).md
+			const className = this._sanitizeFilename(entry.name);
+			outputPath = path.join(this.outputDir, "Classes", className, filename);
+		} else if (entryType === "subclass") {
+			// Subclasses go in: Classes/{ClassName}/Subclasses/{SubclassName} ({Source}).md
+			const className = this._sanitizeFilename(entry.className);
+			outputPath = path.join(this.outputDir, "Classes", className, "Subclasses", filename);
+		} else if (entryType === "optionalfeature") {
+			// Optional features go in: Optional Features/{FeatureType}/{Name} ({Source}).md
+			const featureTypeFolder = this._getOptionalFeatureFolder(entry.featureType);
+			outputPath = path.join(this.outputDir, "Optional Features", featureTypeFolder, filename);
+		} else {
+			// All other types use the standard directory from RESOURCE_TYPE_MAP
+			outputPath = path.join(this.outputDir, resourceInfo.dir, filename);
+		}
 
 		// Ensure directory exists
 		const outputDirPath = path.dirname(outputPath);
