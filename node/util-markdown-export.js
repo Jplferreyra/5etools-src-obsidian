@@ -330,6 +330,8 @@ class FrontmatterGenerator {
 				return {...base, ...this._generatePsionic(entry)};
 			case "reward":
 				return {...base, ...this._generateReward(entry)};
+			case "recipe":
+				return {...base, ...this._generateRecipe(entry)};
 			default:
 				return base;
 		}
@@ -1177,6 +1179,17 @@ class FrontmatterGenerator {
 
 		return fm;
 	}
+
+	_generateRecipe(recipe) {
+		const fm = {};
+
+		// Misc tags (alcohol, feast, etc.)
+		if (recipe.miscTags && recipe.miscTags.length > 0) {
+			fm.miscTags = recipe.miscTags;
+		}
+
+		return fm;
+	}
 }
 
 /**
@@ -1267,6 +1280,21 @@ class MarkdownFormatter {
 				break;
 			case "facility":
 				content = this._formatFacility(entry);
+				break;
+			case "recipe":
+				content = this._formatRecipe(entry);
+				break;
+			case "deck":
+				content = this._formatDeck(entry);
+				break;
+			case "card":
+				content = this._formatCard(entry);
+				break;
+			case "charoption":
+				content = this._formatCharoption(entry);
+				break;
+			case "magicvariant":
+				content = this._formatMagicVariant(entry);
 				break;
 			default:
 				content = this._formatGeneric(entry);
@@ -3187,6 +3215,293 @@ class MarkdownFormatter {
 	}
 
 	/**
+	 * Replace amount placeholders in recipe entries
+	 * Replaces {=amount1/v}, {=amount2/v}, etc. with actual values
+	 */
+	_replaceRecipeAmounts(text, item) {
+		let result = text;
+
+		// Replace amount1, amount2, etc.
+		for (let i = 1; i <= 10; i++) {
+			const amountKey = `amount${i}`;
+			if (item[amountKey] !== undefined) {
+				const placeholder = new RegExp(`\\{=amount${i}/v\\}`, 'g');
+				result = result.replace(placeholder, item[amountKey]);
+			}
+		}
+
+		return result;
+	}
+
+	/**
+	 * Decode diet type code
+	 */
+	_decodeDietType(code) {
+		const dietMap = {
+			"V": "Vegetarian",
+			"C": "Vegetarian (with dairy/eggs)",
+			"X": "Contains meat"
+		};
+		return dietMap[code] || code;
+	}
+
+	/**
+	 * Format recipe entry
+	 */
+	_formatRecipe(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Aliases section
+		if (entry.alias && entry.alias.length > 0) {
+			parts.push(`**Also known as:** ${entry.alias.join(", ")}\n`);
+		}
+
+		// Type
+		if (entry.type) {
+			parts.push(`**Type:** ${entry.type}\n`);
+		}
+
+		// Diet type
+		if (entry.diet) {
+			parts.push(`**Diet:** ${this._decodeDietType(entry.diet)}\n`);
+		}
+
+		// Dish types
+		if (entry.dishTypes && entry.dishTypes.length > 0) {
+			const dishes = entry.dishTypes.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(", ");
+			parts.push(`**Dish Type:** ${dishes}\n`);
+		}
+
+		// Allergen groups
+		if (entry.allergenGroups && entry.allergenGroups.length > 0) {
+			const allergens = entry.allergenGroups.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join(", ");
+			parts.push(`**Allergens:** ${allergens}\n`);
+		}
+
+		// Serves
+		if (entry.serves) {
+			let servesStr = "";
+			if (entry.serves.exact) {
+				servesStr = `${entry.serves.exact}`;
+			} else if (entry.serves.min && entry.serves.max) {
+				servesStr = `${entry.serves.min}-${entry.serves.max}`;
+			}
+			if (entry.serves.note) {
+				servesStr += ` ${entry.serves.note}`;
+			}
+			if (servesStr) {
+				parts.push(`**Serves:** ${servesStr}\n`);
+			}
+		}
+
+		// Equipment
+		if (entry.equipment && entry.equipment.length > 0) {
+			parts.push(`## Equipment\n`);
+			for (const equip of entry.equipment) {
+				if (typeof equip === "string") {
+					parts.push(`- ${equip}`);
+				} else if (equip.entry) {
+					// Replace amounts and render tags
+					let text = this._replaceRecipeAmounts(equip.entry, equip);
+					text = this._renderString(text);
+					parts.push(`- ${text}`);
+				}
+			}
+			parts.push("");
+		}
+
+		// Ingredients
+		if (entry.ingredients && entry.ingredients.length > 0) {
+			parts.push(`## Ingredients\n`);
+			for (const ingredient of entry.ingredients) {
+				if (typeof ingredient === "string") {
+					parts.push(`- ${ingredient}`);
+				} else if (ingredient.entry) {
+					// Replace amounts and render tags
+					let text = this._replaceRecipeAmounts(ingredient.entry, ingredient);
+					text = this._renderString(text);
+					parts.push(`- ${text}`);
+				}
+			}
+			parts.push("");
+		}
+
+		// Instructions
+		if (entry.instructions && entry.instructions.length > 0) {
+			parts.push(`## Instructions\n`);
+			for (let i = 0; i < entry.instructions.length; i++) {
+				parts.push(`${i + 1}. ${entry.instructions[i]}\n`);
+			}
+		}
+
+		// Description (entries)
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format deck entry
+	 */
+	_formatDeck(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Cards in deck
+		if (entry.cards && entry.cards.length > 0) {
+			parts.push(`\n## Cards\n`);
+			for (const card of entry.cards) {
+				const count = card.count || 1;
+				const countStr = count > 1 ? ` (${count}×)` : "";
+				// Extract card name from uid
+				const cardName = card.uid ? card.uid.split("|")[0] : "Unknown Card";
+				parts.push(`- ${cardName}${countStr}`);
+			}
+			parts.push("");
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format card entry
+	 */
+	_formatCard(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Set/Deck
+		if (entry.set) {
+			parts.push(`**Deck:** ${entry.set}\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format character option entry
+	 */
+	_formatCharoption(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Prerequisites
+		if (entry.prerequisite && entry.prerequisite.length > 0) {
+			parts.push(`**Prerequisites:**\n`);
+			for (const prereq of entry.prerequisite) {
+				if (prereq.race) {
+					const races = prereq.race.map(r => r.name).join(", ");
+					parts.push(`- Race: ${races}`);
+				}
+				if (prereq.level) {
+					parts.push(`- Level: ${prereq.level}`);
+				}
+				if (prereq.note) {
+					parts.push(`- ${prereq.note}`);
+				}
+			}
+			parts.push("");
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format magic variant entry (generic magic item variants)
+	 */
+	_formatMagicVariant(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Type (what it requires/applies to)
+		if (entry.requires && entry.requires.length > 0) {
+			const requireTypes = entry.requires.map(r => r.type).filter(Boolean);
+			if (requireTypes.length > 0) {
+				parts.push(`**Applies To:** ${requireTypes.join(", ")}\n`);
+			}
+		}
+
+		// Rarity (from inherits)
+		if (entry.inherits && entry.inherits.rarity) {
+			parts.push(`**Rarity:** ${entry.inherits.rarity}\n`);
+		}
+
+		// Description
+		if (entry.inherits && entry.inherits.entries) {
+			parts.push(this._renderEntries(entry.inherits.entries));
+		} else if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// Source
+		const source = entry.inherits?.source || entry.source;
+		const page = entry.inherits?.page || entry.page;
+		if (source) {
+			const sourceFull = Parser.sourceJsonToFull(source);
+			const pageStr = page ? `, page ${page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
 	 * Render entry content using the markdown renderer
 	 */
 	_renderEntries(entries) {
@@ -3346,6 +3661,11 @@ class MarkdownExportEngine {
 		cult: {dir: "Cults Boons"},
 		boon: {dir: "Cults Boons"},
 		facility: {dir: "Facilities"},
+		recipe: {dir: "Recipes"},
+		deck: {dir: "Decks"},
+		card: {dir: "Cards"},
+		charoption: {dir: "Character Options"},
+		magicvariant: {dir: "Rules/Magic Variants"},
 	};
 
 	/**
