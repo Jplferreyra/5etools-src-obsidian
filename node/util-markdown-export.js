@@ -17,6 +17,15 @@ class ObsidianMarkdownRenderer extends RendererMarkdown {
 	constructor() {
 		super();
 		this._wikilinksEnabled = true;
+		this._itemLookup = null;  // Map of item name (lowercase) -> source
+	}
+
+	/**
+	 * Set the item lookup map for resolving sources
+	 */
+	setItemLookup(itemLookup) {
+		this._itemLookup = itemLookup;
+		return this;
 	}
 
 	static TAG_TO_DIR_MAP = {
@@ -59,22 +68,43 @@ class ObsidianMarkdownRenderer extends RendererMarkdown {
 		// Parse the tag text (format: "name|source|displayText")
 		const parts = Renderer.splitTagByPipe(text);
 		const name = parts[0];
-		const source = parts[1] || "PHB";
+		let source = parts[1];
 		const displayText = parts[2] || name;
 
-		// Get the resource directory
-		const resourceDir = ObsidianMarkdownRenderer.TAG_TO_DIR_MAP[tag];
+		// For @item tags, look up to get source and type (item vs magicvariant)
+		let itemType = null;
+		let properName = name;
+		if (tag === "@item" && this._itemLookup) {
+			const lookupKey = name.toLowerCase();
+			const lookupResult = this._itemLookup.get(lookupKey);
+			if (lookupResult) {
+				if (!source) source = lookupResult.source;
+				itemType = lookupResult.type;
+				properName = lookupResult.name; // Use proper casing from lookup
+			}
+		}
 
-		// Clean the name for use in filename
-		const cleanName = this._cleanName(name);
+		// Default source if still not found
+		if (!source) {
+			source = tag === "@item" ? "DMG" : "PHB";
+		}
+
+		// Get the resource directory - special handling for magic variants
+		let resourceDir = ObsidianMarkdownRenderer.TAG_TO_DIR_MAP[tag];
+		if (tag === "@item" && itemType === "magicvariant") {
+			resourceDir = "Items/Magic Variants";
+		}
+
+		// Clean the name for use in filename (use properName to preserve casing)
+		const cleanName = this._cleanName(properName);
 		const cleanSource = source.toUpperCase();
 
 		// Generate wikilink path - special handling for class hierarchy
-		const filename = `${cleanName} (${cleanSource})`;
+		const filename = `${cleanName} - ${cleanSource}`;
 		let wikilinkPath;
 
 		if (tag === "@class") {
-			// Classes are in: Classes/{ClassName}/{ClassName} ({Source}).md
+			// Classes are in: Classes/{ClassName}/{ClassName} - {Source}.md
 			wikilinkPath = `Classes/${cleanName}/${filename}`;
 		} else if (tag === "@subclass") {
 			// Subclasses need parent class info which we don't have in the tag
@@ -85,7 +115,7 @@ class ObsidianMarkdownRenderer extends RendererMarkdown {
 			wikilinkPath = `${resourceDir}/${filename}`;
 		}
 
-		const wikilink = `[[${wikilinkPath}|${filename}]]`;
+		const wikilink = `[[${wikilinkPath}\\|${filename}]]`;
 		textStack[0] += wikilink;
 	}
 
@@ -349,9 +379,15 @@ class FrontmatterGenerator {
 			name = entry.entries?.[0]?.name || "Unknown Property";
 		}
 
+		// Special handling for magicvariant where source is in inherits
+		let source = entry.source;
+		if (entryType === "magicvariant" && entry.inherits?.source) {
+			source = entry.inherits.source;
+		}
+
 		return {
 			name,
-			source: entry.source || "Unknown",
+			source: source || "Unknown",
 			page: entry.page,
 			type: entryType,
 			tags,
@@ -368,8 +404,14 @@ class FrontmatterGenerator {
 	_generateTags(entry, entryType) {
 		const tags = [`dnd5e/${entryType}`];
 
-		if (entry.source) {
-			tags.push(`dnd5e/source-${entry.source.toLowerCase()}`);
+		// Get source - special handling for magicvariant
+		let source = entry.source;
+		if (entryType === "magicvariant" && entry.inherits?.source) {
+			source = entry.inherits.source;
+		}
+
+		if (source) {
+			tags.push(`dnd5e/source-${source.toLowerCase()}`);
 		}
 
 		// Type-specific tags
@@ -448,9 +490,9 @@ class FrontmatterGenerator {
 	_generateAliases(entry, entryType) {
 		const aliases = [];
 
-		// Add "Name (SOURCE)" format as alias
+		// Add "Name - SOURCE" format as alias (matches filename)
 		if (entry.name && entry.source) {
-			aliases.push(`${entry.name} (${entry.source})`);
+			aliases.push(`${entry.name} - ${entry.source}`);
 		}
 
 		// Add alternate names if present
@@ -1196,9 +1238,12 @@ class FrontmatterGenerator {
  * Formats markdown content for different resource types
  */
 class MarkdownFormatter {
-	constructor(renderer, legendaryGroups = []) {
+	constructor(renderer, legendaryGroups = [], magicVariantLookup = null, itemGroupLookup = null, itemTypeLookup = null) {
 		this.renderer = renderer;
 		this.legendaryGroups = legendaryGroups;
+		this.magicVariantLookup = magicVariantLookup;
+		this.itemGroupLookup = itemGroupLookup;
+		this.itemTypeLookup = itemTypeLookup; // Maps "abbr|source" -> {name, source, abbreviation, items[]}
 
 		// Build a lookup map for faster access
 		this.legendaryGroupMap = new Map();
@@ -1284,17 +1329,17 @@ class MarkdownFormatter {
 			case "recipe":
 				content = this._formatRecipe(entry);
 				break;
-			case "deck":
-				content = this._formatDeck(entry);
-				break;
-			case "card":
-				content = this._formatCard(entry);
-				break;
 			case "charoption":
 				content = this._formatCharoption(entry);
 				break;
 			case "magicvariant":
 				content = this._formatMagicVariant(entry);
+				break;
+			case "itemGroup":
+				content = this._formatItemGroup(entry);
+				break;
+			case "itemType":
+				content = this._formatItemType(entry);
 				break;
 			default:
 				content = this._formatGeneric(entry);
@@ -1784,8 +1829,8 @@ class MarkdownFormatter {
 					// Create wikilink for standard weapon properties (those we have files for)
 					const linkableProperties = ['Ammunition', 'Finesse', 'Heavy', 'Light', 'Loading', 'Range', 'Reach', 'Thrown', 'Two-Handed', 'Versatile'];
 					if (linkableProperties.includes(name) && source) {
-						const filename = `${name} (${source})`;
-						return `[[Rules/Weapon Properties/${filename}|${filename}]]`;
+						const filename = `${name} - ${source}`;
+						return `[[Rules/Weapon Properties/${filename}\\|${filename}]]`;
 					}
 
 					return name;
@@ -1800,8 +1845,8 @@ class MarkdownFormatter {
 					const masteryStr = typeof m === 'string' ? m : m?.uid || m;
 					const [masteryName, source] = masteryStr.split('|');
 					// Create wikilink to variant rule (will be exported later)
-					const filename = `${masteryName} (${source})`;
-					return `[[Rules/Variant Rules/${filename}|${filename}]]`;
+					const filename = `${masteryName} - ${source}`;
+					return `[[Rules/Variant Rules/${filename}\\|${filename}]]`;
 				}).join(", ");
 				propParts.push(`**Mastery:** ${masteryLinks}`);
 			}
@@ -2046,12 +2091,12 @@ class MarkdownFormatter {
 				if (isSubclassFeature) {
 					// For subclass selection level, add links to all subclasses
 					if (level === 3 || displayName.includes(cls.subclassTitle)) {
-						features.push(`[[#${cls.subclassTitle}|${displayName}]]`);
+						features.push(`[[#${cls.subclassTitle}\\|${displayName}]]`);
 					} else {
 						features.push(displayName);
 					}
 				} else {
-					features.push(`[[#${displayName}|${displayName}]]`);
+					features.push(`[[#${displayName}\\|${displayName}]]`);
 				}
 			}
 		}
@@ -2105,7 +2150,7 @@ class MarkdownFormatter {
 							.sort((a, b) => a.name.localeCompare(b.name));
 
 						for (const sc of subclasses) {
-							parts.push(`- [[Classes/${cls.name}/Subclasses/${sc.name} (${sc.source})|${sc.name}]]\n`);
+							parts.push(`- [[Classes/${cls.name}/Subclasses/${sc.name} - ${sc.source}\\|${sc.name}]]\n`);
 						}
 						parts.push("");
 						subclassesListed = true;
@@ -2175,7 +2220,7 @@ class MarkdownFormatter {
 
 		// Class info
 		if (subclass.className) {
-			parts.push(`**Class:** [[classes/${subclass.className} (${subclass.classSource})|${subclass.className}]]\n`);
+			parts.push(`**Class:** [[Classes/${subclass.className}/${subclass.className} - ${subclass.classSource}\\|${subclass.className}]]\n`);
 		}
 
 		// Subclass features table (if has features at multiple levels)
@@ -2216,7 +2261,7 @@ class MarkdownFormatter {
 
 			if (level) {
 				const displayName = featureName.split("|")[0];
-				parts.push(`| ${level} | [[#${displayName}|${displayName}]] |`);
+				parts.push(`| ${level} | [[#${displayName}\\|${displayName}]] |`);
 			}
 		}
 
@@ -2704,6 +2749,16 @@ class MarkdownFormatter {
 	}
 
 	/**
+	 * Generate a block ID from table name for Dice Roller plugin
+	 */
+	_generateTableBlockId(tableName) {
+		return tableName
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-|-$/g, "");
+	}
+
+	/**
 	 * Format table entry content
 	 */
 	_formatTable(entry) {
@@ -2746,6 +2801,9 @@ class MarkdownFormatter {
 				parts.push(`| ${cells.join(" | ")} |`);
 			}
 
+			// Add block ID for Dice Roller plugin
+			const blockId = this._generateTableBlockId(entry.name);
+			parts.push(`^${blockId}`);
 			parts.push(""); // Empty line after table
 		}
 
@@ -3353,69 +3411,22 @@ class MarkdownFormatter {
 	}
 
 	/**
-	 * Format deck entry
+	 * Decode option type codes for character options
 	 */
-	_formatDeck(entry) {
-		const parts = [];
+	_decodeOptionType(typeCode) {
+		const parts = typeCode.split(":");
 
-		// Title
-		parts.push(`# ${entry.name}\n`);
+		const baseTypeMap = {
+			"CS": "Character Secret",
+			"SG": "Supernatural Gift",
+			"DG": "Dark Gift",
+			"RF": "Background"
+		};
 
-		// Description
-		if (entry.entries) {
-			parts.push(this._renderEntries(entry.entries));
-		}
+		const baseType = baseTypeMap[parts[0]] || parts[0];
 
-		// Cards in deck
-		if (entry.cards && entry.cards.length > 0) {
-			parts.push(`\n## Cards\n`);
-			for (const card of entry.cards) {
-				const count = card.count || 1;
-				const countStr = count > 1 ? ` (${count}×)` : "";
-				// Extract card name from uid
-				const cardName = card.uid ? card.uid.split("|")[0] : "Unknown Card";
-				parts.push(`- ${cardName}${countStr}`);
-			}
-			parts.push("");
-		}
-
-		// Source
-		if (entry.source) {
-			const sourceFull = Parser.sourceJsonToFull(entry.source);
-			const pageStr = entry.page ? `, page ${entry.page}` : "";
-			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
-		}
-
-		return parts.join("\n");
-	}
-
-	/**
-	 * Format card entry
-	 */
-	_formatCard(entry) {
-		const parts = [];
-
-		// Title
-		parts.push(`# ${entry.name}\n`);
-
-		// Set/Deck
-		if (entry.set) {
-			parts.push(`**Deck:** ${entry.set}\n`);
-		}
-
-		// Description
-		if (entry.entries) {
-			parts.push(this._renderEntries(entry.entries));
-		}
-
-		// Source
-		if (entry.source) {
-			const sourceFull = Parser.sourceJsonToFull(entry.source);
-			const pageStr = entry.page ? `, page ${entry.page}` : "";
-			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
-		}
-
-		return parts.join("\n");
+		// RF:B means "Reference Background" but we just call it "Background"
+		return baseType;
 	}
 
 	/**
@@ -3426,6 +3437,12 @@ class MarkdownFormatter {
 
 		// Title
 		parts.push(`# ${entry.name}\n`);
+
+		// Option Type
+		if (entry.optionType && entry.optionType.length > 0) {
+			const decodedTypes = entry.optionType.map(t => this._decodeOptionType(t)).join(", ");
+			parts.push(`**Type:** ${decodedTypes}\n`);
+		}
 
 		// Prerequisites
 		if (entry.prerequisite && entry.prerequisite.length > 0) {
@@ -3473,7 +3490,19 @@ class MarkdownFormatter {
 		if (entry.requires && entry.requires.length > 0) {
 			const requireTypes = entry.requires.map(r => r.type).filter(Boolean);
 			if (requireTypes.length > 0) {
-				parts.push(`**Applies To:** ${requireTypes.join(", ")}\n`);
+				// Create links to concept files
+				const linkedTypes = requireTypes.map(typeKey => {
+					// Try to look up the type name
+					const lookupKey = typeKey.toLowerCase();
+					const typeData = this.itemTypeLookup?.get(lookupKey);
+					if (typeData) {
+						const filename = `${typeData.name} - ${typeData.source}`;
+						return `[[Rules/Concepts/${filename}\\|${typeData.name}]]`;
+					}
+					// Fallback to just the abbreviation if not found
+					return typeKey;
+				});
+				parts.push(`**Applies To:** ${linkedTypes.join(", ")}\n`);
 			}
 		}
 
@@ -3495,6 +3524,103 @@ class MarkdownFormatter {
 		if (source) {
 			const sourceFull = Parser.sourceJsonToFull(source);
 			const pageStr = page ? `, page ${page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format item group entry (groups of related items like "Sword of Answering")
+	 */
+	_formatItemGroup(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Rarity
+		if (entry.rarity) {
+			parts.push(`**Rarity:** ${entry.rarity}\n`);
+		}
+
+		// Attunement
+		if (entry.reqAttune) {
+			const attuneText = typeof entry.reqAttune === "string" ? ` (${entry.reqAttune})` : "";
+			parts.push(`**Requires Attunement**${attuneText}\n`);
+		}
+
+		// Type info
+		if (entry.wondrous) {
+			parts.push(`**Wondrous Item**\n`);
+		}
+
+		// Description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+		}
+
+		// List of items in the group - create links using {@item} tags
+		if (entry.items && entry.items.length > 0) {
+			parts.push(`\n## Variants\n`);
+			for (const itemRef of entry.items) {
+				// itemRef is usually in format "item name|source"
+				// Use _renderString to process {@item} tag and create proper link
+				const itemTag = `{@item ${itemRef}}`;
+				const linkedItem = this._renderString(itemTag);
+				parts.push(`- ${linkedItem}`);
+			}
+			parts.push("");
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format item type entry (concepts like "Melee Weapon", "Heavy Armor", etc.)
+	 */
+	_formatItemType(entry) {
+		const parts = [];
+
+		// Title
+		parts.push(`# ${entry.name}\n`);
+
+		// Abbreviation
+		if (entry.abbreviation) {
+			parts.push(`**Abbreviation:** \`${entry.abbreviation}\`\n`);
+		}
+
+		// Entries/description
+		if (entry.entries) {
+			parts.push(this._renderEntries(entry.entries));
+			parts.push("");
+		}
+
+		// List items of this type
+		const typeKey = `${entry.abbreviation}|${entry.source}`.toLowerCase();
+		const typeData = this.itemTypeLookup?.get(typeKey);
+		if (typeData?.items && typeData.items.length > 0) {
+			parts.push(`## Items\n`);
+			for (const item of typeData.items) {
+				// Create link to item
+				const itemTag = `{@item ${item.name}|${item.source}}`;
+				const linkedItem = this._renderString(itemTag);
+				parts.push(`- ${linkedItem}`);
+			}
+			parts.push("");
+		}
+
+		// Source
+		if (entry.source) {
+			const sourceFull = Parser.sourceJsonToFull(entry.source);
+			const pageStr = entry.page ? `, page ${entry.page}` : "";
 			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
 		}
 
@@ -3620,9 +3746,135 @@ class MarkdownExportEngine {
 			console.warn("Failed to load legendary groups, lair actions/regional effects won't be added:", e.message);
 		}
 
+		// Load item data for source lookup (when @item tags don't specify source)
+		// Stores {source, type, name} where type indicates where the item file lives
+		this.itemLookup = new Map();
+		try {
+			const itemFiles = ["items.json", "items-base.json"];
+			for (const file of itemFiles) {
+				const filePath = path.join(this.dataDir, file);
+				if (fs.existsSync(filePath)) {
+					const data = readJson(filePath);
+					const items = data.item || data.baseitem || [];
+					for (const item of items) {
+						if (item.name && item.source) {
+							const key = item.name.toLowerCase();
+							// Only set if not already present (first source wins)
+							if (!this.itemLookup.has(key)) {
+								this.itemLookup.set(key, {source: item.source, type: "item", name: item.name});
+							}
+						}
+					}
+				}
+			}
+			this.log(`Loaded item lookup data (${this.itemLookup.size} items)`);
+		} catch (e) {
+			console.warn("Failed to load item lookup, item sources may be incorrect:", e.message);
+		}
+
+		// Load magic variant data for source lookup
+		this.magicVariantLookup = new Map();
+		try {
+			const magicVariantsPath = path.join(this.dataDir, "magicvariants.json");
+			if (fs.existsSync(magicVariantsPath)) {
+				const data = readJson(magicVariantsPath);
+				const variants = data.magicvariant || [];
+				for (const variant of variants) {
+					if (variant.name && variant.inherits?.source) {
+						const key = variant.name.toLowerCase();
+						// Only set if not already present (first source wins)
+						if (!this.magicVariantLookup.has(key)) {
+							this.magicVariantLookup.set(key, variant.inherits.source);
+						}
+						// Also add to itemLookup so @item tags can find magic variants
+						if (!this.itemLookup.has(key)) {
+							this.itemLookup.set(key, {source: variant.inherits.source, type: "magicvariant", name: variant.name});
+						}
+					}
+				}
+				this.log(`Loaded magic variant lookup data (${this.magicVariantLookup.size} variants)`);
+			}
+		} catch (e) {
+			console.warn("Failed to load magic variant lookup:", e.message);
+		}
+
+		// Load item group data for source lookup (stores {name, source} to preserve proper casing)
+		this.itemGroupLookup = new Map();
+		try {
+			const itemsPath = path.join(this.dataDir, "items.json");
+			if (fs.existsSync(itemsPath)) {
+				const data = readJson(itemsPath);
+				const groups = data.itemGroup || [];
+				for (const group of groups) {
+					if (group.name && group.source) {
+						const key = group.name.toLowerCase();
+						// Only set if not already present (first source wins)
+						if (!this.itemGroupLookup.has(key)) {
+							this.itemGroupLookup.set(key, {name: group.name, source: group.source});
+						}
+					}
+				}
+				this.log(`Loaded item group lookup data (${this.itemGroupLookup.size} groups)`);
+			}
+		} catch (e) {
+			console.warn("Failed to load item group lookup:", e.message);
+		}
+
+		// Load item type data for concepts (maps "abbr|source" -> {name, source, abbreviation, items[]})
+		this.itemTypeLookup = new Map();
+		try {
+			const itemsBasePath = path.join(this.dataDir, "items-base.json");
+			if (fs.existsSync(itemsBasePath)) {
+				const data = readJson(itemsBasePath);
+				const types = data.itemType || [];
+				for (const type of types) {
+					if (type.abbreviation && type.source) {
+						const key = `${type.abbreviation}|${type.source}`.toLowerCase();
+						// Only set if not already present (first wins)
+						if (!this.itemTypeLookup.has(key)) {
+							this.itemTypeLookup.set(key, {
+								name: type.name,
+								source: type.source,
+								abbreviation: type.abbreviation,
+								items: [],
+							});
+						}
+					}
+				}
+				this.log(`Loaded item type lookup data (${this.itemTypeLookup.size} types)`);
+
+				// Now collect items for each type
+				const itemFiles = ["items.json", "items-base.json"];
+				for (const file of itemFiles) {
+					const filePath = path.join(this.dataDir, file);
+					if (fs.existsSync(filePath)) {
+						const itemData = readJson(filePath);
+						const items = itemData.item || itemData.baseitem || [];
+						for (const item of items) {
+							if (item.type && item.name && item.source) {
+								// type can be "A" or "A|XPHB" format
+								const typeKey = item.type.includes("|")
+									? item.type.toLowerCase()
+									: `${item.type}|${item.source}`.toLowerCase();
+								const typeData = this.itemTypeLookup.get(typeKey);
+								if (typeData) {
+									typeData.items.push({name: item.name, source: item.source});
+								}
+							}
+						}
+					}
+				}
+			}
+		} catch (e) {
+			console.warn("Failed to load item type lookup:", e.message);
+		}
+
+		// Set item lookup on renderer
+		this.renderer.setItemLookup(this.itemLookup);
+
 		// Initialize generators with loaded data
 		this.frontmatterGenerator = new FrontmatterGenerator(this.spellClassLookup);
-		this.formatter = new MarkdownFormatter(this.renderer, this.legendaryGroups);
+		this.formatter = new MarkdownFormatter(this.renderer, this.legendaryGroups, this.magicVariantLookup, this.itemGroupLookup, this.itemTypeLookup);
 	}
 
 	/**
@@ -3662,10 +3914,10 @@ class MarkdownExportEngine {
 		boon: {dir: "Cults Boons"},
 		facility: {dir: "Facilities"},
 		recipe: {dir: "Recipes"},
-		deck: {dir: "Decks"},
-		card: {dir: "Cards"},
 		charoption: {dir: "Character Options"},
-		magicvariant: {dir: "Rules/Magic Variants"},
+		magicvariant: {dir: "Items/Magic Variants"},
+		itemGroup: {dir: "Items/Groups"},
+		itemType: {dir: "Rules/Concepts"},
 	};
 
 	/**
@@ -3683,10 +3935,18 @@ class MarkdownExportEngine {
 		let filesToProcess = files;
 		if (options.resourceTypes) {
 			const resourceTypes = options.resourceTypes.map(r => r.toLowerCase());
+			// Some resource types are in files with different names
+			const typeToFileMapping = {
+				"itemtype": "items-base",
+			};
 			filesToProcess = files.filter(file => {
 				// Check if file contains any of the specified resource types
 				// This is a simple heuristic - we'll validate when we read the file
-				return resourceTypes.some(type => file.includes(type));
+				return resourceTypes.some(type => {
+					const mappedFile = typeToFileMapping[type];
+					if (mappedFile && file.includes(mappedFile)) return true;
+					return file.includes(type);
+				});
 			});
 			this.log(`Filtered to ${filesToProcess.length} files matching resource types: ${resourceTypes.join(", ")}`);
 		}
@@ -3742,6 +4002,15 @@ class MarkdownExportEngine {
 	 */
 	async processFile(sourceFile, force = false) {
 		this.log(`Processing ${sourceFile}...`);
+
+		// Special handling for loot.json and life.json
+		const filename = path.basename(sourceFile);
+		if (filename === "loot.json") {
+			return await this.processLootFile(sourceFile, force);
+		}
+		if (filename === "life.json") {
+			return await this.processLifeFile(sourceFile, force);
+		}
 
 		// Detect changes
 		const changeInfo = await this.tracker.detectChanges(sourceFile);
@@ -3858,26 +4127,31 @@ class MarkdownExportEngine {
 		// Generate filename
 		// For subraces, include the base race name
 		// For itemProperty, the name is nested in entries[0].name
+		// For magicvariant, source is in inherits.source
 		let displayName = entry.name;
 		if (entryType === "subrace" && entry.raceName) {
 			displayName = `${entry.name} ${entry.raceName}`;
 		} else if (entryType === "itemProperty") {
 			displayName = entry.entries?.[0]?.name || "Unknown Property";
 		}
-		const filename = this._sanitizeFilename(`${displayName} (${entry.source || "Unknown"}).md`);
+		let entrySource = entry.source;
+		if (entryType === "magicvariant" && entry.inherits?.source) {
+			entrySource = entry.inherits.source;
+		}
+		const filename = this._sanitizeFilename(`${displayName} - ${entrySource || "Unknown"}.md`);
 
 		// Determine output path - special handling for class/subclass hierarchy and optional features
 		let outputPath;
 		if (entryType === "class") {
-			// Classes go in: Classes/{ClassName}/{ClassName} ({Source}).md
+			// Classes go in: Classes/{ClassName}/{ClassName} - {Source}.md
 			const className = this._sanitizeFilename(entry.name);
 			outputPath = path.join(this.outputDir, "Classes", className, filename);
 		} else if (entryType === "subclass") {
-			// Subclasses go in: Classes/{ClassName}/Subclasses/{SubclassName} ({Source}).md
+			// Subclasses go in: Classes/{ClassName}/Subclasses/{SubclassName} - {Source}.md
 			const className = this._sanitizeFilename(entry.className);
 			outputPath = path.join(this.outputDir, "Classes", className, "Subclasses", filename);
 		} else if (entryType === "optionalfeature") {
-			// Optional features go in: Optional Features/{FeatureType}/{Name} ({Source}).md
+			// Optional features go in: Optional Features/{FeatureType}/{Name} - {Source}.md
 			const featureTypeFolder = this._getOptionalFeatureFolder(entry.featureType);
 			outputPath = path.join(this.outputDir, "Optional Features", featureTypeFolder, filename);
 		} else {
@@ -3947,6 +4221,585 @@ class MarkdownExportEngine {
 		if (this.verbose) {
 			console.log(message);
 		}
+	}
+
+	// ===== LOOT AND LIFE TABLE PROCESSING =====
+
+	/**
+	 * Process loot.json file
+	 */
+	async processLootFile(sourceFile, force = false) {
+		this.log(`Processing loot tables from ${sourceFile}...`);
+		const data = readJson(sourceFile);
+
+		const lootCategories = [
+			{key: 'gems', folder: 'Gems', rollerName: 'Gems Roller', formatter: (t) => this._formatGemsTable(t)},
+			{key: 'individual', folder: 'Individual', rollerName: 'Individual Treasure Roller', formatter: (t) => this._formatIndividualTreasureTable(t)},
+			{key: 'hoard', folder: 'Hoard', rollerName: 'Hoard Roller', formatter: (t) => this._formatHoardTable(t)},
+			{key: 'magicItems', folder: 'Magic Items', rollerName: 'Magic Items Roller', formatter: (t) => this._formatMagicItemsTable(t)},
+			{key: 'dragon', folder: 'Dragon', rollerName: 'Dragon Hoard Roller', formatter: (t) => this._formatDragonTable(t)}
+		];
+
+		for (const category of lootCategories) {
+			if (!data[category.key]) continue;
+
+			const outputDir = path.join(this.outputDir, "Tables", "Loot", category.folder);
+			if (!fs.existsSync(outputDir)) {
+				fs.mkdirSync(outputDir, {recursive: true});
+			}
+
+			// Export individual tables
+			for (const table of data[category.key]) {
+				const filename = this._sanitizeFilename(`${table.name} - ${table.source}.md`);
+				const outputPath = path.join(outputDir, filename);
+				const markdown = category.formatter(table);
+				fs.writeFileSync(outputPath, markdown, "utf8");
+				this.stats.updated++;
+				this.log(`  ✓ Exported ${filename}`);
+			}
+
+			// Create master roll file
+			await this._createLootMasterRollFile(data[category.key], category.key, category.rollerName, outputDir);
+		}
+	}
+
+	/**
+	 * Process life.json file
+	 */
+	async processLifeFile(sourceFile, force = false) {
+		this.log(`Processing life tables from ${sourceFile}...`);
+		const data = readJson(sourceFile);
+
+		const baseDir = path.join(this.outputDir, "Tables", "Life Random Generators");
+
+		// Process lifeTrinket - just an array of strings
+		if (data.lifeTrinket) {
+			const trinketDir = path.join(baseDir, "Trinkets");
+			if (!fs.existsSync(trinketDir)) {
+				fs.mkdirSync(trinketDir, {recursive: true});
+			}
+
+			const markdown = this._formatLifeTrinketTable(data.lifeTrinket);
+			const outputPath = path.join(trinketDir, "Trinkets.md");
+			fs.writeFileSync(outputPath, markdown, "utf8");
+			this.stats.updated++;
+			this.log(`  ✓ Exported Trinkets.md`);
+		}
+
+		// Process lifeBackground
+		if (data.lifeBackground) {
+			const bgDir = path.join(baseDir, "Backgrounds");
+			if (!fs.existsSync(bgDir)) {
+				fs.mkdirSync(bgDir, {recursive: true});
+			}
+
+			for (const entry of data.lifeBackground) {
+				const filename = this._sanitizeFilename(`${entry.name}.md`);
+				const outputPath = path.join(bgDir, filename);
+				const markdown = this._formatLifeEntry(entry, 'background');
+				fs.writeFileSync(outputPath, markdown, "utf8");
+				this.stats.updated++;
+				this.log(`  ✓ Exported ${filename}`);
+			}
+
+			// Create roller file
+			await this._createLifeRollerFile(data.lifeBackground, 'Backgrounds', bgDir);
+		}
+
+		// Process lifeClass
+		if (data.lifeClass) {
+			const classDir = path.join(baseDir, "Classes");
+			if (!fs.existsSync(classDir)) {
+				fs.mkdirSync(classDir, {recursive: true});
+			}
+
+			for (const entry of data.lifeClass) {
+				const filename = this._sanitizeFilename(`${entry.name}.md`);
+				const outputPath = path.join(classDir, filename);
+				const markdown = this._formatLifeEntry(entry, 'class');
+				fs.writeFileSync(outputPath, markdown, "utf8");
+				this.stats.updated++;
+				this.log(`  ✓ Exported ${filename}`);
+			}
+
+			// Create roller file
+			await this._createLifeRollerFile(data.lifeClass, 'Classes', classDir);
+		}
+	}
+
+	/**
+	 * Format gems table
+	 */
+	_formatGemsTable(table) {
+		const parts = [];
+
+		// Frontmatter
+		parts.push(`---`);
+		parts.push(`name: "${table.name}"`);
+		parts.push(`source: ${table.source}`);
+		if (table.page) parts.push(`page: ${table.page}`);
+		parts.push(`type: loot-gems`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/loot"`);
+		parts.push(`  - "dnd5e/loot/gems"`);
+		parts.push(`---`);
+		parts.push(`# ${table.name}\n`);
+
+		// Table
+		parts.push(`| dice: 1d${table.table.length} | Gemstone |`);
+		parts.push(`| --- | --- |`);
+
+		for (let i = 0; i < table.table.length; i++) {
+			const gem = table.table[i];
+			const gemText = this.formatter._renderString(gem);
+			parts.push(`| ${i + 1} | ${gemText} |`);
+		}
+
+		const blockId = this.formatter._generateTableBlockId(table.name);
+		parts.push(`^${blockId}\n`);
+
+		// Source
+		if (table.source) {
+			const sourceFull = Parser.sourceJsonToFull(table.source);
+			const pageStr = table.page ? `, page ${table.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format individual treasure table
+	 */
+	_formatIndividualTreasureTable(table) {
+		const parts = [];
+
+		// Frontmatter
+		parts.push(`---`);
+		parts.push(`name: "${table.name}"`);
+		parts.push(`source: ${table.source}`);
+		if (table.page) parts.push(`page: ${table.page}`);
+		parts.push(`type: loot-individual`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/loot"`);
+		parts.push(`  - "dnd5e/loot/individual"`);
+		parts.push(`---`);
+		parts.push(`# ${table.name}\n`);
+
+		// Table
+		parts.push(`| dice: 1d100 | Treasure |`);
+		parts.push(`| --- | --- |`);
+
+		for (const row of table.table) {
+			const range = row.min === row.max ? `${row.min}` : `${row.min}-${row.max}`;
+			const coins = this._formatCoins(row.coins);
+			parts.push(`| ${range} | ${coins} |`);
+		}
+
+		const blockId = this.formatter._generateTableBlockId(table.name);
+		parts.push(`^${blockId}\n`);
+
+		// Source
+		if (table.source) {
+			const sourceFull = Parser.sourceJsonToFull(table.source);
+			const pageStr = table.page ? `, page ${table.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format hoard table
+	 */
+	_formatHoardTable(table) {
+		const parts = [];
+
+		// Frontmatter
+		parts.push(`---`);
+		parts.push(`name: "${table.name}"`);
+		parts.push(`source: ${table.source}`);
+		if (table.page) parts.push(`page: ${table.page}`);
+		parts.push(`type: loot-hoard`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/loot"`);
+		parts.push(`  - "dnd5e/loot/hoard"`);
+		parts.push(`---`);
+		parts.push(`# ${table.name}\n`);
+
+		// Show coins if present
+		if (table.coins) {
+			parts.push(`**Coins:** ${this._formatCoins(table.coins)}\n`);
+		}
+
+		// Table
+		parts.push(`| dice: 1d100 | Additional Treasure |`);
+		parts.push(`| --- | --- |`);
+
+		for (const row of table.table) {
+			const range = row.min === row.max ? `${row.min}` : `${row.min}-${row.max}`;
+			let treasure = this._formatHoardRow(row);
+			parts.push(`| ${range} | ${treasure} |`);
+		}
+
+		const blockId = this.formatter._generateTableBlockId(table.name);
+		parts.push(`^${blockId}\n`);
+
+		// Source
+		if (table.source) {
+			const sourceFull = Parser.sourceJsonToFull(table.source);
+			const pageStr = table.page ? `, page ${table.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format magic items table
+	 */
+	_formatMagicItemsTable(table) {
+		const parts = [];
+
+		// Frontmatter
+		parts.push(`---`);
+		parts.push(`name: "${table.name}"`);
+		parts.push(`source: ${table.source}`);
+		if (table.page) parts.push(`page: ${table.page}`);
+		parts.push(`type: loot-magicItems`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/loot"`);
+		parts.push(`  - "dnd5e/loot/magicItems"`);
+		parts.push(`---`);
+		parts.push(`# ${table.name}\n`);
+
+		// Table
+		parts.push(`| dice: 1d100 | Magic Item |`);
+		parts.push(`| --- | --- |`);
+
+		for (const row of table.table) {
+			const range = row.min === row.max ? `${row.min}` : `${row.min}-${row.max}`;
+			let item = this._formatMagicItemRow(row);
+			parts.push(`| ${range} | ${item} |`);
+		}
+
+		const blockId = this.formatter._generateTableBlockId(table.name);
+		parts.push(`^${blockId}\n`);
+
+		// Source
+		if (table.source) {
+			const sourceFull = Parser.sourceJsonToFull(table.source);
+			const pageStr = table.page ? `, page ${table.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format dragon loot table
+	 */
+	_formatDragonTable(table) {
+		const parts = [];
+
+		// Frontmatter
+		parts.push(`---`);
+		parts.push(`name: "${table.name}"`);
+		parts.push(`source: ${table.source}`);
+		if (table.page) parts.push(`page: ${table.page}`);
+		parts.push(`type: loot-dragon`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/loot"`);
+		parts.push(`  - "dnd5e/loot/dragon"`);
+		parts.push(`---`);
+		parts.push(`# ${table.name}\n`);
+
+		// Show coins if present
+		if (table.coins) {
+			parts.push(`**Coins:** ${this._formatCoins(table.coins)}\n`);
+		}
+
+		// Additional info
+		if (table.dragonMundaneItems) {
+			parts.push(`**Mundane Items:** ${table.dragonMundaneItems.amount}\n`);
+		}
+
+		if (table.gems) {
+			parts.push(`**Gems:** ${table.gems.amount}\n`);
+		}
+
+		if (table.artObjects) {
+			parts.push(`**Art Objects:** ${table.artObjects.amount}\n`);
+		}
+
+		// Source
+		if (table.source) {
+			const sourceFull = Parser.sourceJsonToFull(table.source);
+			const pageStr = table.page ? `, page ${table.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format dragon mundane items table
+	 */
+	_formatDragonMundaneItemsTable(table) {
+		const parts = [];
+
+		// Frontmatter
+		parts.push(`---`);
+		parts.push(`name: "${table.name}"`);
+		parts.push(`source: ${table.source}`);
+		if (table.page) parts.push(`page: ${table.page}`);
+		parts.push(`type: loot-dragonMundaneItems`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/loot"`);
+		parts.push(`  - "dnd5e/loot/dragonMundaneItems"`);
+		parts.push(`---`);
+		parts.push(`# ${table.name}\n`);
+
+		// Table
+		parts.push(`| dice: 1d${table.table.length} | Item |`);
+		parts.push(`| --- | --- |`);
+
+		for (let i = 0; i < table.table.length; i++) {
+			const item = table.table[i];
+			const itemText = this.formatter._renderString(item);
+			parts.push(`| ${i + 1} | ${itemText} |`);
+		}
+
+		const blockId = this.formatter._generateTableBlockId(table.name);
+		parts.push(`^${blockId}\n`);
+
+		// Source
+		if (table.source) {
+			const sourceFull = Parser.sourceJsonToFull(table.source);
+			const pageStr = table.page ? `, page ${table.page}` : "";
+			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Helper: Format coins object to string
+	 * Escapes * characters to prevent markdown bold interpretation
+	 */
+	_formatCoins(coins) {
+		if (!coins) return "—";
+		const parts = [];
+		// Escape * to \* to prevent markdown interpretation
+		const escape = (val) => String(val).replace(/\*/g, "\\*");
+		if (coins.cp) parts.push(`${escape(coins.cp)} cp`);
+		if (coins.sp) parts.push(`${escape(coins.sp)} sp`);
+		if (coins.ep) parts.push(`${escape(coins.ep)} ep`);
+		if (coins.gp) parts.push(`${escape(coins.gp)} gp`);
+		if (coins.pp) parts.push(`${escape(coins.pp)} pp`);
+		return parts.join(", ") || "—";
+	}
+
+	/**
+	 * Helper: Format hoard table row
+	 */
+	_formatHoardRow(row) {
+		const parts = [];
+		if (row.gems) {
+			parts.push(`${row.gems.amount} × ${row.gems.type} gp gems`);
+		}
+		if (row.artObjects) {
+			parts.push(`${row.artObjects.amount} × ${row.artObjects.type} gp art objects`);
+		}
+		if (row.magicItems) {
+			for (const mi of row.magicItems) {
+				parts.push(`${mi.amount} from Magic Item Table ${mi.type}`);
+			}
+		}
+		return parts.join(" + ") || "—";
+	}
+
+	/**
+	 * Helper: Format magic item row with nested rolls
+	 */
+	_formatMagicItemRow(row) {
+		if (row.item) {
+			// Check if this is a plain text reference (no {@item} tag)
+			// If it matches an item group, create a link with proper casing
+			if (!row.item.includes("{@") && this.itemGroupLookup) {
+				const lookupKey = row.item.toLowerCase();
+				if (this.itemGroupLookup.has(lookupKey)) {
+					const {name, source} = this.itemGroupLookup.get(lookupKey);
+					const tableNote = row.table ? ` (roll \`dice: 1d${row.table.length}\` for specific type)` : "";
+					return `[[Items/Groups/${name} - ${source}\\|${name} - ${source}]]${tableNote}`;
+				}
+			}
+			// Check if this has a nested table
+			if (row.table) {
+				// Create nested dice roll inline
+				const itemText = this.formatter._renderString(row.item);
+				// For nested tables, we'll create a sub-table and reference it
+				return `${itemText} (roll \`dice: 1d${row.table.length}\` for specific type)`;
+			} else {
+				return this.formatter._renderString(row.item);
+			}
+		}
+		if (row.choose) {
+			if (row.choose.fromGeneric) {
+				const name = row.choose.fromGeneric[0];
+				// Look up source from magic variant data
+				const source = this.magicVariantLookup?.get(name.toLowerCase()) || "DMG";
+				return `[[Items/Magic Variants/${name} - ${source}\\|${name} - ${source}]]`;
+			}
+			if (row.choose.fromGroup) {
+				const rawName = row.choose.fromGroup[0];
+				// Look up proper name and source from item group data
+				const lookupResult = this.itemGroupLookup?.get(rawName.toLowerCase());
+				const name = lookupResult?.name || rawName;
+				const source = lookupResult?.source || "DMG";
+				return `[[Items/Groups/${name} - ${source}\\|${name} - ${source}]]`;
+			}
+		}
+		return "Special";
+	}
+
+	/**
+	 * Create master roll file for loot tables
+	 */
+	async _createLootMasterRollFile(tables, category, rollerName, outputDir) {
+		const parts = [];
+
+		parts.push(`---`);
+		parts.push(`name: "${rollerName}"`);
+		parts.push(`type: loot-master`);
+		parts.push(`---`);
+		parts.push(`# ${rollerName}\n`);
+		parts.push(`Click any roll button to generate a random result from that table:\n`);
+
+		for (const table of tables) {
+			const filename = this._sanitizeFilename(`${table.name} - ${table.source}.md`);
+			const blockId = this.formatter._generateTableBlockId(table.name);
+			parts.push(`- **${table.name}**: \`dice: [[${filename.replace('.md', '')}^${blockId}]]\``);
+		}
+
+		const masterFilename = `${rollerName}.md`;
+		const masterPath = path.join(outputDir, masterFilename);
+		fs.writeFileSync(masterPath, parts.join("\n"), "utf8");
+		this.stats.updated++;
+		this.log(`  ✓ Created ${rollerName}`);
+	}
+
+	// ===== LIFE TABLE FORMATTERS =====
+
+	/**
+	 * Format life trinket table
+	 */
+	_formatLifeTrinketTable(trinkets) {
+		const parts = [];
+
+		parts.push(`---`);
+		parts.push(`name: "Trinkets"`);
+		parts.push(`type: life-trinket`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/life"`);
+		parts.push(`  - "dnd5e/life/trinket"`);
+		parts.push(`---`);
+		parts.push(`# Trinkets\n`);
+
+		parts.push(`| dice: 1d${trinkets.length} | Trinket |`);
+		parts.push(`| --- | --- |`);
+
+		for (let i = 0; i < trinkets.length; i++) {
+			parts.push(`| ${i + 1} | ${trinkets[i]} |`);
+		}
+
+		parts.push(`^trinkets\n`);
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Format life entry (background or class)
+	 */
+	_formatLifeEntry(entry, type) {
+		const parts = [];
+
+		parts.push(`---`);
+		parts.push(`name: "${entry.name}"`);
+		parts.push(`source: ${entry.source}`);
+		parts.push(`type: life-${type}`);
+		parts.push(`tags:`);
+		parts.push(`  - "dnd5e/life"`);
+		parts.push(`  - "dnd5e/life/${type}"`);
+		parts.push(`---`);
+		parts.push(`# ${entry.name}\n`);
+
+		// Reasons table
+		if (entry.reasons && entry.reasons.length > 0) {
+			parts.push(`## Why ${entry.name}?\n`);
+			parts.push(`| dice: 1d${entry.reasons.length} | Reason |`);
+			parts.push(`| --- | --- |`);
+			for (let i = 0; i < entry.reasons.length; i++) {
+				parts.push(`| ${i + 1} | ${entry.reasons[i]} |`);
+			}
+			const blockId = this.formatter._generateTableBlockId(`${entry.name}-reasons`);
+			parts.push(`^${blockId}\n`);
+		}
+
+		// Other tables
+		if (entry.other) {
+			for (const [tableName, tableData] of Object.entries(entry.other)) {
+				parts.push(`## ${tableName}\n`);
+				parts.push(`| dice: 1d${tableData.length} | ${tableName} |`);
+				parts.push(`| --- | --- |`);
+				for (let i = 0; i < tableData.length; i++) {
+					parts.push(`| ${i + 1} | ${tableData[i]} |`);
+				}
+				const blockId = this.formatter._generateTableBlockId(`${entry.name}-${tableName}`);
+				parts.push(`^${blockId}\n`);
+			}
+		}
+
+		return parts.join("\n");
+	}
+
+	/**
+	 * Create roller file for life tables
+	 */
+	async _createLifeRollerFile(entries, categoryName, outputDir) {
+		const parts = [];
+
+		parts.push(`---`);
+		parts.push(`name: "${categoryName} Roller"`);
+		parts.push(`type: life-master`);
+		parts.push(`---`);
+		parts.push(`# ${categoryName} Roller\n`);
+		parts.push(`Click any roll button to generate a random result:\n`);
+
+		for (const entry of entries) {
+			const filename = this._sanitizeFilename(`${entry.name}.md`);
+			parts.push(`\n## ${entry.name}\n`);
+
+			// Reasons
+			if (entry.reasons) {
+				const blockId = this.formatter._generateTableBlockId(`${entry.name}-reasons`);
+				parts.push(`- **Why ${entry.name}?**: \`dice: [[${filename.replace('.md', '')}^${blockId}]]\``);
+			}
+
+			// Other tables
+			if (entry.other) {
+				for (const tableName of Object.keys(entry.other)) {
+					const blockId = this.formatter._generateTableBlockId(`${entry.name}-${tableName}`);
+					parts.push(`- **${tableName}**: \`dice: [[${filename.replace('.md', '')}^${blockId}]]\``);
+				}
+			}
+		}
+
+		const masterFilename = `${categoryName} Roller.md`;
+		const masterPath = path.join(outputDir, masterFilename);
+		fs.writeFileSync(masterPath, parts.join("\n"), "utf8");
+		this.stats.updated++;
+		this.log(`  ✓ Created ${categoryName} Roller`);
 	}
 }
 
