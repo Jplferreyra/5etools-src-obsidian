@@ -1238,12 +1238,13 @@ class FrontmatterGenerator {
  * Formats markdown content for different resource types
  */
 class MarkdownFormatter {
-	constructor(renderer, legendaryGroups = [], magicVariantLookup = null, itemGroupLookup = null, itemTypeLookup = null) {
+	constructor(renderer, legendaryGroups = [], magicVariantLookup = null, itemGroupLookup = null, itemTypeLookup = null, monsterFluffLookup = null) {
 		this.renderer = renderer;
 		this.legendaryGroups = legendaryGroups;
 		this.magicVariantLookup = magicVariantLookup;
 		this.itemGroupLookup = itemGroupLookup;
 		this.itemTypeLookup = itemTypeLookup; // Maps "abbr|source" -> {name, source, abbreviation, items[]}
+		this.monsterFluffLookup = monsterFluffLookup; // Maps "name|source" -> image path
 
 		// Build a lookup map for faster access
 		this.legendaryGroupMap = new Map();
@@ -1727,6 +1728,12 @@ class MarkdownFormatter {
 			const sourceFull = Parser.sourceJsonToFull(monster.source);
 			const pageStr = monster.page ? `, page ${monster.page}` : "";
 			parts.push(`**Source:** *${sourceFull}*${pageStr}`);
+		}
+
+		// 19. Image (at the end)
+		const imageUrl = this._getMonsterImageUrl(monster);
+		if (imageUrl) {
+			parts.push(`\n\n![${monster.name}](${imageUrl})`);
 		}
 
 		return parts.join("\n");
@@ -3714,6 +3721,21 @@ class MarkdownFormatter {
 	}
 
 	/**
+	 * Get the image URL for a monster from fluff data
+	 */
+	_getMonsterImageUrl(monster) {
+		if (!this.monsterFluffLookup) return null;
+		const key = `${monster.name}|${monster.source}`.toLowerCase();
+		const imagePath = this.monsterFluffLookup.get(key);
+		if (imagePath) {
+			// Convert internal path to 5etools URL, escaping spaces
+			const escapedPath = imagePath.replace(/ /g, "%20");
+			return `https://5e.tools/img/${escapedPath}`;
+		}
+		return null;
+	}
+
+	/**
 	 * Generate Fantasy Statblocks YAML for a monster
 	 */
 	_generateStatblockYaml(monster) {
@@ -3723,6 +3745,12 @@ class MarkdownFormatter {
 		lines.push(`columns: 2`);
 		lines.push(`columnWidth: 325`);
 		lines.push(`columnHeight: 750`);
+
+		// Image (from fluff data)
+		const imageUrl = this._getMonsterImageUrl(monster);
+		if (imageUrl) {
+			lines.push(`image: ${imageUrl}`);
+		}
 
 		// Name
 		lines.push(`name: ${this._escapeYamlString(monster.name)}`);
@@ -4028,6 +4056,42 @@ class MarkdownExportEngine {
 			console.warn("Failed to load legendary groups, lair actions/regional effects won't be added:", e.message);
 		}
 
+		// Load monster fluff data for images
+		this.monsterFluffLookup = new Map();
+		try {
+			const bestiaryDir = path.join(this.dataDir, "bestiary");
+			const fluffFiles = fs.readdirSync(bestiaryDir).filter(f => f.startsWith("fluff-bestiary-"));
+			for (const file of fluffFiles) {
+				const filePath = path.join(bestiaryDir, file);
+				const data = readJson(filePath);
+				const fluffEntries = data.monsterFluff || [];
+				for (const fluff of fluffEntries) {
+					if (!fluff.name || !fluff.source) continue;
+					const key = `${fluff.name}|${fluff.source}`.toLowerCase();
+
+					// Skip if already have an image for this monster
+					if (this.monsterFluffLookup.has(key)) continue;
+
+					// Check direct images array
+					let firstImage = null;
+					if (fluff.images && fluff.images.length > 0) {
+						firstImage = fluff.images[0];
+					}
+					// Check _copy._mod.images.items (for entries using inheritance)
+					else if (fluff._copy?._mod?.images?.items && fluff._copy._mod.images.items.length > 0) {
+						firstImage = fluff._copy._mod.images.items[0];
+					}
+
+					if (firstImage?.href?.type === "internal" && firstImage.href?.path) {
+						this.monsterFluffLookup.set(key, firstImage.href.path);
+					}
+				}
+			}
+			this.log(`Loaded monster fluff data (${this.monsterFluffLookup.size} monsters with images)`);
+		} catch (e) {
+			console.warn("Failed to load monster fluff, images won't be added:", e.message);
+		}
+
 		// Load item data for source lookup (when @item tags don't specify source)
 		// Stores {source, type, name} where type indicates where the item file lives
 		this.itemLookup = new Map();
@@ -4156,7 +4220,7 @@ class MarkdownExportEngine {
 
 		// Initialize generators with loaded data
 		this.frontmatterGenerator = new FrontmatterGenerator(this.spellClassLookup);
-		this.formatter = new MarkdownFormatter(this.renderer, this.legendaryGroups, this.magicVariantLookup, this.itemGroupLookup, this.itemTypeLookup);
+		this.formatter = new MarkdownFormatter(this.renderer, this.legendaryGroups, this.magicVariantLookup, this.itemGroupLookup, this.itemTypeLookup, this.monsterFluffLookup);
 	}
 
 	/**
