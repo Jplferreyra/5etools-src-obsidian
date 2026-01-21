@@ -3710,6 +3710,8 @@ class MarkdownFormatter {
 
 		// Layout columns
 		lines.push(`columns: 2`);
+		lines.push(`columnWidth: 325`);
+		lines.push(`columnHeight: 750`);
 
 		// Name
 		lines.push(`name: ${this._escapeYamlString(monster.name)}`);
