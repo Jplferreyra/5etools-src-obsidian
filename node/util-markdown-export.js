@@ -329,7 +329,7 @@ class FrontmatterGenerator {
 				}
 				return result;
 			case "monster":
-				return {...base, ...this._generateMonster(entry)};
+				return {...base, statblock: "inline", ...this._generateMonster(entry)};
 			case "item":
 			case "baseitem":
 				return {...base, ...this._generateItem(entry)};
@@ -1473,10 +1473,15 @@ class MarkdownFormatter {
 	_formatMonster(monster) {
 		const parts = [];
 
-		// Title
+		// 1. Fantasy Statblocks codeblock
+		parts.push("```statblock");
+		parts.push(this._generateStatblockYaml(monster));
+		parts.push("```\n");
+
+		// 2. Title
 		parts.push(`# ${monster.name}\n`);
 
-		// Size, type, alignment
+		// 3. Size, type, alignment
 		const typeStr = [];
 		if (monster.size) {
 			const sizeMap = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
@@ -1500,7 +1505,10 @@ class MarkdownFormatter {
 			parts.push(`*${typeStr.join(" ")}*\n`);
 		}
 
-		// Stats block
+		// 4. Horizontal rule
+		parts.push("---\n");
+
+		// 5. Stats block
 		const stats = [];
 		if (monster.ac) {
 			const acStr = Array.isArray(monster.ac) ? monster.ac.map(ac => typeof ac === "number" ? ac : ac.ac).join(", ") : monster.ac;
@@ -1519,7 +1527,7 @@ class MarkdownFormatter {
 			parts.push(stats.join("  \n") + "\n");
 		}
 
-		// Ability scores
+		// 6. Ability scores table
 		if (monster.str !== undefined) {
 			const abilities = [];
 			abilities.push(`| STR | DEX | CON | INT | WIS | CHA |`);
@@ -1536,7 +1544,7 @@ class MarkdownFormatter {
 			parts.push(abilities.join("\n") + "\n");
 		}
 
-		// Additional stats (saves, skills, etc.)
+		// 7. Additional stats (saves, skills, etc.)
 		const additionalStats = [];
 		if (monster.save) {
 			const saves = [];
@@ -1600,119 +1608,94 @@ class MarkdownFormatter {
 			parts.push(additionalStats.join("  \n") + "\n");
 		}
 
-		// Traits
+		// 8. Horizontal rule before traits
+		parts.push("---\n");
+
+		// 9. Traits (inline format, no section header)
 		if (monster.trait && monster.trait.length) {
-			parts.push("## Traits\n");
 			for (const trait of monster.trait) {
-				if (trait.name) {
-					parts.push(`### ${this._renderString(trait.name)}\n`);
-				}
-				if (trait.entries) {
-					parts.push(this._renderEntries(trait.entries) + "\n");
-				}
+				parts.push(this._formatTraitInline(trait) + "\n");
 			}
 		}
 
-		// Spellcasting
+		// 10. Spellcasting (inline format)
 		if (monster.spellcasting && monster.spellcasting.length) {
 			for (const sc of monster.spellcasting) {
-				if (sc.name) {
-					parts.push(`### ${this._renderString(sc.name)}\n`);
-				}
+				const name = sc.name || "Spellcasting";
+				let desc = "";
 				if (sc.headerEntries) {
-					parts.push(this._renderEntries(sc.headerEntries) + "\n");
+					desc += this._renderEntries(sc.headerEntries);
 				}
 				if (sc.spells) {
 					// Format spell list
+					const spellParts = [];
 					for (const [level, spellData] of Object.entries(sc.spells)) {
 						if (spellData.spells && spellData.spells.length) {
 							const levelStr = level === "0" ? "Cantrips" : `${level}${this._getOrdinalSuffix(parseInt(level))} level`;
 							const slots = spellData.slots ? ` (${spellData.slots} slots)` : "";
 							// Process each spell through _renderString to convert {@spell} tags to wikilinks
 							const spellList = spellData.spells.map(spell => this._renderString(spell)).join(", ");
-							parts.push(`**${levelStr}${slots}:** ${spellList}\n`);
+							spellParts.push(`**${levelStr}${slots}:** ${spellList}`);
 						}
+					}
+					if (spellParts.length) {
+						desc += "\n" + spellParts.join("\n");
 					}
 				}
 				if (sc.footerEntries) {
-					parts.push(this._renderEntries(sc.footerEntries) + "\n");
+					desc += "\n" + this._renderEntries(sc.footerEntries);
 				}
+				parts.push(`***${name}.*** ${desc.trim()}\n`);
 			}
 		}
 
-		// Actions
+		// 11. Actions
 		if (monster.action && monster.action.length) {
 			parts.push("## Actions\n");
 			for (const action of monster.action) {
-				if (action.name) {
-					parts.push(`### ${this._renderString(action.name)}\n`);
-				}
-				if (action.entries) {
-					parts.push(this._renderEntries(action.entries) + "\n");
-				}
+				parts.push(this._formatTraitInline(action) + "\n");
 			}
 		}
 
-		// Bonus Actions
+		// 12. Bonus Actions
 		if (monster.bonus && monster.bonus.length) {
 			parts.push("## Bonus Actions\n");
 			for (const bonus of monster.bonus) {
-				if (bonus.name) {
-					parts.push(`### ${this._renderString(bonus.name)}\n`);
-				}
-				if (bonus.entries) {
-					parts.push(this._renderEntries(bonus.entries) + "\n");
-				}
+				parts.push(this._formatTraitInline(bonus) + "\n");
 			}
 		}
 
-		// Reactions
+		// 13. Reactions
 		if (monster.reaction && monster.reaction.length) {
 			parts.push("## Reactions\n");
 			for (const reaction of monster.reaction) {
-				if (reaction.name) {
-					parts.push(`### ${this._renderString(reaction.name)}\n`);
-				}
-				if (reaction.entries) {
-					parts.push(this._renderEntries(reaction.entries) + "\n");
-				}
+				parts.push(this._formatTraitInline(reaction) + "\n");
 			}
 		}
 
-		// Legendary Actions
+		// 14. Legendary Actions
 		if (monster.legendary && monster.legendary.length) {
 			parts.push("## Legendary Actions\n");
 
 			// Add legendary actions header text (standard D&D 5e format)
-			// The number of actions is typically 3 unless specified otherwise
 			const actionCount = monster.legendaryActions || 3;
 			const creatureName = monster.isNamedCreature || monster.isNpc ? monster.name : `the ${monster.name.toLowerCase()}`;
 			parts.push(`${creatureName.charAt(0).toUpperCase() + creatureName.slice(1)} can take ${actionCount} legendary actions, choosing from the options below. Only one legendary action option can be used at a time and only at the end of another creature's turn. ${creatureName.charAt(0).toUpperCase() + creatureName.slice(1)} regains spent legendary actions at the start of its turn.\n`);
 
 			for (const legendary of monster.legendary) {
-				if (legendary.name) {
-					parts.push(`### ${this._renderString(legendary.name)}\n`);
-				}
-				if (legendary.entries) {
-					parts.push(this._renderEntries(legendary.entries) + "\n");
-				}
+				parts.push(this._formatTraitInline(legendary) + "\n");
 			}
 		}
 
-		// Mythic Actions
+		// 15. Mythic Actions
 		if (monster.mythic && monster.mythic.length) {
 			parts.push("## Mythic Actions\n");
 			for (const mythic of monster.mythic) {
-				if (mythic.name) {
-					parts.push(`### ${this._renderString(mythic.name)}\n`);
-				}
-				if (mythic.entries) {
-					parts.push(this._renderEntries(mythic.entries) + "\n");
-				}
+				parts.push(this._formatTraitInline(mythic) + "\n");
 			}
 		}
 
-		// Lair Actions (from monster data or legendary group)
+		// 16. Lair Actions (from monster data or legendary group)
 		let lairActions = monster.lair;
 		if (!lairActions && monster.legendaryGroup) {
 			const group = this._getLegendaryGroup(monster.legendaryGroup);
@@ -1725,7 +1708,7 @@ class MarkdownFormatter {
 			parts.push(this._renderEntries(lairActions) + "\n");
 		}
 
-		// Regional Effects (from monster data or legendary group)
+		// 17. Regional Effects (from monster data or legendary group)
 		let regionalEffects = monster.regional;
 		if (!regionalEffects && monster.legendaryGroup) {
 			const group = this._getLegendaryGroup(monster.legendaryGroup);
@@ -1738,11 +1721,12 @@ class MarkdownFormatter {
 			parts.push(this._renderEntries(regionalEffects) + "\n");
 		}
 
-		// Source
+		// 18. Source
 		if (monster.source) {
+			parts.push("---\n");
 			const sourceFull = Parser.sourceJsonToFull(monster.source);
 			const pageStr = monster.page ? `, page ${monster.page}` : "";
-			parts.push(`\n---\n**Source:** *${sourceFull}*${pageStr}`);
+			parts.push(`**Source:** *${sourceFull}*${pageStr}`);
 		}
 
 		return parts.join("\n");
@@ -3659,6 +3643,291 @@ class MarkdownFormatter {
 	/**
 	 * Look up legendary group data for a monster
 	 */
+	/**
+	 * Escape a string for YAML - handles colons, quotes, and special characters
+	 */
+	_escapeYamlString(str) {
+		if (str == null) return "";
+		str = String(str);
+		// If string contains special YAML characters, wrap in quotes
+		if (str.includes(":") || str.includes("#") || str.includes("'") || str.includes('"') ||
+			str.includes("\n") || str.startsWith("-") || str.startsWith("*") ||
+			str.includes("{") || str.includes("}") || str.includes("[") || str.includes("]")) {
+			// Escape double quotes and wrap in double quotes
+			return `"${str.replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+		}
+		return str;
+	}
+
+	/**
+	 * Format a trait/action inline: ***Name.*** Description
+	 */
+	_formatTraitInline(item) {
+		if (!item) return "";
+		const name = item.name ? this._renderString(item.name) : "";
+		const desc = item.entries ? this._renderEntries(item.entries) : "";
+		if (name && desc) {
+			return `***${name}.*** ${desc}`;
+		} else if (name) {
+			return `***${name}.***`;
+		} else if (desc) {
+			return desc;
+		}
+		return "";
+	}
+
+	/**
+	 * Strip Obsidian wikilinks from text for use in YAML
+	 * Converts [[Path/To/Note|Display]] to Display
+	 * Converts [[Path/To/Note]] to Note (last part of path)
+	 * Handles nested brackets in paths like [[Path [with brackets]|Display]]
+	 */
+	_stripWikilinks(str) {
+		if (!str) return "";
+		// Handle wikilinks - need to match balanced brackets
+		// Use a non-greedy approach: find [[ then match until ]]
+		str = str.replace(/\[\[(.+?)\]\]/g, (match, content) => {
+			// Check if there's a pipe for display text
+			// Find the LAST pipe (in case path has pipes, though unlikely)
+			const pipeIndex = content.lastIndexOf("|");
+			if (pipeIndex !== -1) {
+				// Return the display text (after the pipe)
+				return content.substring(pipeIndex + 1);
+			} else {
+				// No pipe - extract note name from path
+				const parts = content.split("/");
+				return parts[parts.length - 1];
+			}
+		});
+		return str;
+	}
+
+	/**
+	 * Generate Fantasy Statblocks YAML for a monster
+	 */
+	_generateStatblockYaml(monster) {
+		const lines = [];
+
+		// Layout columns
+		lines.push(`columns: 2`);
+
+		// Name
+		lines.push(`name: ${this._escapeYamlString(monster.name)}`);
+
+		// Size
+		if (monster.size) {
+			const sizeMap = {T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"};
+			const sizes = Array.isArray(monster.size) ? monster.size : [monster.size];
+			lines.push(`size: ${sizeMap[sizes[0]] || sizes[0]}`);
+		}
+
+		// Type
+		if (monster.type) {
+			const type = typeof monster.type === "string" ? monster.type : monster.type.type;
+			lines.push(`type: ${type}`);
+			// Subtype/tags
+			if (typeof monster.type === "object" && monster.type.tags && monster.type.tags.length > 0) {
+				lines.push(`subtype: ${monster.type.tags.join(", ")}`);
+			}
+		}
+
+		// Alignment
+		if (monster.alignment) {
+			const alignments = Array.isArray(monster.alignment) ? monster.alignment : [monster.alignment];
+			lines.push(`alignment: ${Parser.alignmentListToFull(alignments).toLowerCase()}`);
+		}
+
+		// AC
+		if (monster.ac) {
+			const acVal = Array.isArray(monster.ac) ?
+				(typeof monster.ac[0] === "number" ? monster.ac[0] : monster.ac[0].ac) :
+				monster.ac;
+			lines.push(`ac: ${acVal}`);
+		}
+
+		// HP
+		if (monster.hp) {
+			const hp = monster.hp.average || monster.hp.special || 0;
+			lines.push(`hp: ${hp}`);
+			if (monster.hp.formula) {
+				lines.push(`hit_dice: ${monster.hp.formula}`);
+			}
+		}
+
+		// Speed
+		if (monster.speed) {
+			lines.push(`speed: ${Parser.getSpeedString(monster)}`);
+		}
+
+		// Stats array [str, dex, con, int, wis, cha]
+		if (monster.str !== undefined) {
+			lines.push(`stats: [${monster.str}, ${monster.dex}, ${monster.con}, ${monster.int}, ${monster.wis}, ${monster.cha}]`);
+		}
+
+		// Saves
+		if (monster.save) {
+			lines.push(`saves:`);
+			for (const [ability, value] of Object.entries(monster.save)) {
+				lines.push(`  - ${ability}: ${value}`);
+			}
+		}
+
+		// Skills
+		if (monster.skill) {
+			lines.push(`skillsaves:`);
+			for (const [skill, value] of Object.entries(monster.skill)) {
+				lines.push(`  - ${skill}: ${value}`);
+			}
+		}
+
+		// Damage vulnerabilities
+		if (monster.vulnerable && monster.vulnerable.length) {
+			const vulns = Array.isArray(monster.vulnerable) ? monster.vulnerable.join(", ") : monster.vulnerable;
+			lines.push(`damage_vulnerabilities: ${vulns}`);
+		}
+
+		// Damage resistances
+		if (monster.resist && monster.resist.length) {
+			const resists = Array.isArray(monster.resist) ? monster.resist.join(", ") : monster.resist;
+			lines.push(`damage_resistances: ${resists}`);
+		}
+
+		// Damage immunities
+		if (monster.immune && monster.immune.length) {
+			const immunes = Array.isArray(monster.immune) ? monster.immune.join(", ") : monster.immune;
+			lines.push(`damage_immunities: ${immunes}`);
+		}
+
+		// Condition immunities
+		if (monster.conditionImmune && monster.conditionImmune.length) {
+			const condImmunes = Array.isArray(monster.conditionImmune) ? monster.conditionImmune.join(", ") : monster.conditionImmune;
+			lines.push(`condition_immunities: ${condImmunes}`);
+		}
+
+		// Senses
+		if (monster.senses || monster.passive !== undefined) {
+			const senseParts = [];
+			if (monster.senses) {
+				const senses = Array.isArray(monster.senses) ? monster.senses.join(", ") : monster.senses;
+				senseParts.push(senses);
+			}
+			if (monster.passive !== undefined) {
+				senseParts.push(`passive Perception ${monster.passive}`);
+			}
+			lines.push(`senses: ${senseParts.join(", ")}`);
+		}
+
+		// Languages
+		if (monster.languages) {
+			const langs = Array.isArray(monster.languages) ? monster.languages.join(", ") : monster.languages;
+			lines.push(`languages: ${this._escapeYamlString(langs)}`);
+		}
+
+		// CR
+		if (monster.cr !== undefined) {
+			const cr = typeof monster.cr === "object" ? monster.cr.cr : monster.cr;
+			lines.push(`cr: ${this._escapeYamlString(String(cr))}`);
+		}
+
+		// Traits
+		if (monster.trait && monster.trait.length) {
+			lines.push(`traits:`);
+			for (const trait of monster.trait) {
+				const name = trait.name ? this._stripWikilinks(this._renderString(trait.name)) : "";
+				const desc = trait.entries ? this._stripWikilinks(this._renderEntries(trait.entries)).replace(/\n/g, " ") : "";
+				lines.push(`  - name: ${this._escapeYamlString(name)}`);
+				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
+			}
+		}
+
+		// Spellcasting (as a trait)
+		if (monster.spellcasting && monster.spellcasting.length) {
+			if (!monster.trait || !monster.trait.length) {
+				lines.push(`traits:`);
+			}
+			for (const sc of monster.spellcasting) {
+				const name = sc.name || "Spellcasting";
+				let desc = "";
+				if (sc.headerEntries) {
+					desc += this._stripWikilinks(this._renderEntries(sc.headerEntries));
+				}
+				if (sc.spells) {
+					const spellParts = [];
+					for (const [level, spellData] of Object.entries(sc.spells)) {
+						if (spellData.spells && spellData.spells.length) {
+							const levelStr = level === "0" ? "Cantrips" : `${level}${this._getOrdinalSuffix(parseInt(level))} level`;
+							const slots = spellData.slots ? ` (${spellData.slots} slots)` : "";
+							const spellList = spellData.spells.map(spell => this._stripWikilinks(this._renderString(spell))).join(", ");
+							spellParts.push(`${levelStr}${slots}: ${spellList}`);
+						}
+					}
+					if (spellParts.length) {
+						desc += " " + spellParts.join("; ");
+					}
+				}
+				lines.push(`  - name: ${this._escapeYamlString(name)}`);
+				lines.push(`    desc: ${this._escapeYamlString(desc.replace(/\n/g, " ").trim())}`);
+			}
+		}
+
+		// Actions
+		if (monster.action && monster.action.length) {
+			lines.push(`actions:`);
+			for (const action of monster.action) {
+				const name = action.name ? this._stripWikilinks(this._renderString(action.name)) : "";
+				const desc = action.entries ? this._stripWikilinks(this._renderEntries(action.entries)).replace(/\n/g, " ") : "";
+				lines.push(`  - name: ${this._escapeYamlString(name)}`);
+				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
+			}
+		}
+
+		// Bonus Actions
+		if (monster.bonus && monster.bonus.length) {
+			lines.push(`bonus_actions:`);
+			for (const bonus of monster.bonus) {
+				const name = bonus.name ? this._stripWikilinks(this._renderString(bonus.name)) : "";
+				const desc = bonus.entries ? this._stripWikilinks(this._renderEntries(bonus.entries)).replace(/\n/g, " ") : "";
+				lines.push(`  - name: ${this._escapeYamlString(name)}`);
+				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
+			}
+		}
+
+		// Reactions
+		if (monster.reaction && monster.reaction.length) {
+			lines.push(`reactions:`);
+			for (const reaction of monster.reaction) {
+				const name = reaction.name ? this._stripWikilinks(this._renderString(reaction.name)) : "";
+				const desc = reaction.entries ? this._stripWikilinks(this._renderEntries(reaction.entries)).replace(/\n/g, " ") : "";
+				lines.push(`  - name: ${this._escapeYamlString(name)}`);
+				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
+			}
+		}
+
+		// Legendary Actions
+		if (monster.legendary && monster.legendary.length) {
+			lines.push(`legendary_actions:`);
+			for (const legendary of monster.legendary) {
+				const name = legendary.name ? this._stripWikilinks(this._renderString(legendary.name)) : "";
+				const desc = legendary.entries ? this._stripWikilinks(this._renderEntries(legendary.entries)).replace(/\n/g, " ") : "";
+				lines.push(`  - name: ${this._escapeYamlString(name)}`);
+				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
+			}
+		}
+
+		// Mythic Actions
+		if (monster.mythic && monster.mythic.length) {
+			lines.push(`mythic_actions:`);
+			for (const mythic of monster.mythic) {
+				const name = mythic.name ? this._stripWikilinks(this._renderString(mythic.name)) : "";
+				const desc = mythic.entries ? this._stripWikilinks(this._renderEntries(mythic.entries)).replace(/\n/g, " ") : "";
+				lines.push(`  - name: ${this._escapeYamlString(name)}`);
+				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
+			}
+		}
+
+		return lines.join("\n");
+	}
+
 	_getLegendaryGroup(legendaryGroupRef) {
 		if (!legendaryGroupRef || !this.legendaryGroupMap) {
 			return null;
