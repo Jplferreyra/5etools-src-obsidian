@@ -3677,6 +3677,17 @@ class MarkdownFormatter {
 	}
 
 	/**
+	 * Unescape wikilinks for YAML - removes backslash before pipe
+	 * Converts [[Path\\|Display]] to [[Path|Display]]
+	 * Fantasy Statblocks needs unescaped wikilinks to render them
+	 */
+	_unescapeWikilinks(str) {
+		if (!str) return "";
+		// Remove backslash before pipe in wikilinks: [[path\|name]] -> [[path|name]]
+		return str.replace(/\[\[([^\]]+)\\\|([^\]]+)\]\]/g, "[[$1|$2]]");
+	}
+
+	/**
 	 * Strip Obsidian wikilinks from text for use in YAML
 	 * Converts [[Path/To/Note|Display]] to Display
 	 * Converts [[Path/To/Note]] to Note (last part of path)
@@ -3835,8 +3846,8 @@ class MarkdownFormatter {
 		if (monster.trait && monster.trait.length) {
 			lines.push(`traits:`);
 			for (const trait of monster.trait) {
-				const name = trait.name ? this._stripWikilinks(this._renderString(trait.name)) : "";
-				const desc = trait.entries ? this._stripWikilinks(this._renderEntries(trait.entries)).replace(/\n/g, " ") : "";
+				const name = trait.name ? this._renderString(trait.name) : "";
+				const desc = trait.entries ? this._unescapeWikilinks(this._renderEntries(trait.entries).replace(/\n/g, " ")) : "";
 				lines.push(`  - name: ${this._escapeYamlString(name)}`);
 				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
 			}
@@ -3851,7 +3862,7 @@ class MarkdownFormatter {
 				const name = sc.name || "Spellcasting";
 				let desc = "";
 				if (sc.headerEntries) {
-					desc += this._stripWikilinks(this._renderEntries(sc.headerEntries));
+					desc += this._renderEntries(sc.headerEntries);
 				}
 				if (sc.spells) {
 					const spellParts = [];
@@ -3859,7 +3870,7 @@ class MarkdownFormatter {
 						if (spellData.spells && spellData.spells.length) {
 							const levelStr = level === "0" ? "Cantrips" : `${level}${this._getOrdinalSuffix(parseInt(level))} level`;
 							const slots = spellData.slots ? ` (${spellData.slots} slots)` : "";
-							const spellList = spellData.spells.map(spell => this._stripWikilinks(this._renderString(spell))).join(", ");
+							const spellList = spellData.spells.map(spell => this._renderString(spell)).join(", ");
 							spellParts.push(`${levelStr}${slots}: ${spellList}`);
 						}
 					}
@@ -3868,7 +3879,7 @@ class MarkdownFormatter {
 					}
 				}
 				lines.push(`  - name: ${this._escapeYamlString(name)}`);
-				lines.push(`    desc: ${this._escapeYamlString(desc.replace(/\n/g, " ").trim())}`);
+				lines.push(`    desc: ${this._escapeYamlString(this._unescapeWikilinks(desc.replace(/\n/g, " ").trim()))}`);
 			}
 		}
 
@@ -3876,8 +3887,8 @@ class MarkdownFormatter {
 		if (monster.action && monster.action.length) {
 			lines.push(`actions:`);
 			for (const action of monster.action) {
-				const name = action.name ? this._stripWikilinks(this._renderString(action.name)) : "";
-				const desc = action.entries ? this._stripWikilinks(this._renderEntries(action.entries)).replace(/\n/g, " ") : "";
+				const name = action.name ? this._renderString(action.name) : "";
+				const desc = action.entries ? this._unescapeWikilinks(this._renderEntries(action.entries).replace(/\n/g, " ")) : "";
 				lines.push(`  - name: ${this._escapeYamlString(name)}`);
 				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
 			}
@@ -3887,8 +3898,8 @@ class MarkdownFormatter {
 		if (monster.bonus && monster.bonus.length) {
 			lines.push(`bonus_actions:`);
 			for (const bonus of monster.bonus) {
-				const name = bonus.name ? this._stripWikilinks(this._renderString(bonus.name)) : "";
-				const desc = bonus.entries ? this._stripWikilinks(this._renderEntries(bonus.entries)).replace(/\n/g, " ") : "";
+				const name = bonus.name ? this._renderString(bonus.name) : "";
+				const desc = bonus.entries ? this._unescapeWikilinks(this._renderEntries(bonus.entries).replace(/\n/g, " ")) : "";
 				lines.push(`  - name: ${this._escapeYamlString(name)}`);
 				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
 			}
@@ -3898,8 +3909,8 @@ class MarkdownFormatter {
 		if (monster.reaction && monster.reaction.length) {
 			lines.push(`reactions:`);
 			for (const reaction of monster.reaction) {
-				const name = reaction.name ? this._stripWikilinks(this._renderString(reaction.name)) : "";
-				const desc = reaction.entries ? this._stripWikilinks(this._renderEntries(reaction.entries)).replace(/\n/g, " ") : "";
+				const name = reaction.name ? this._renderString(reaction.name) : "";
+				const desc = reaction.entries ? this._unescapeWikilinks(this._renderEntries(reaction.entries).replace(/\n/g, " ")) : "";
 				lines.push(`  - name: ${this._escapeYamlString(name)}`);
 				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
 			}
@@ -3909,8 +3920,8 @@ class MarkdownFormatter {
 		if (monster.legendary && monster.legendary.length) {
 			lines.push(`legendary_actions:`);
 			for (const legendary of monster.legendary) {
-				const name = legendary.name ? this._stripWikilinks(this._renderString(legendary.name)) : "";
-				const desc = legendary.entries ? this._stripWikilinks(this._renderEntries(legendary.entries)).replace(/\n/g, " ") : "";
+				const name = legendary.name ? this._renderString(legendary.name) : "";
+				const desc = legendary.entries ? this._unescapeWikilinks(this._renderEntries(legendary.entries).replace(/\n/g, " ")) : "";
 				lines.push(`  - name: ${this._escapeYamlString(name)}`);
 				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
 			}
@@ -3920,8 +3931,8 @@ class MarkdownFormatter {
 		if (monster.mythic && monster.mythic.length) {
 			lines.push(`mythic_actions:`);
 			for (const mythic of monster.mythic) {
-				const name = mythic.name ? this._stripWikilinks(this._renderString(mythic.name)) : "";
-				const desc = mythic.entries ? this._stripWikilinks(this._renderEntries(mythic.entries)).replace(/\n/g, " ") : "";
+				const name = mythic.name ? this._renderString(mythic.name) : "";
+				const desc = mythic.entries ? this._unescapeWikilinks(this._renderEntries(mythic.entries).replace(/\n/g, " ")) : "";
 				lines.push(`  - name: ${this._escapeYamlString(name)}`);
 				lines.push(`    desc: ${this._escapeYamlString(desc)}`);
 			}
