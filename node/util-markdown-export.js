@@ -1730,11 +1730,8 @@ class MarkdownFormatter {
 			parts.push(`**Source:** *${sourceFull}*${pageStr}`);
 		}
 
-		// 19. Image (at the end)
-		const imageUrl = this._getMonsterImageUrl(monster);
-		if (imageUrl) {
-			parts.push(`\n\n![${monster.name}](${imageUrl})`);
-		}
+		// 19. Image (at the end - main art)
+		parts.push(`\n\n![${monster.name}](${this._getMonsterArtUrl(monster)})`);
 
 		return parts.join("\n");
 	}
@@ -3691,7 +3688,8 @@ class MarkdownFormatter {
 	_unescapeWikilinks(str) {
 		if (!str) return "";
 		// Remove backslash before pipe in wikilinks: [[path\|name]] -> [[path|name]]
-		return str.replace(/\[\[([^\]]+)\\\|([^\]]+)\]\]/g, "[[$1|$2]]");
+		// Use a more robust pattern that handles brackets in paths like [Area of Effect]
+		return str.replace(/\[\[(.+?)\\\|(.+?)\]\]/g, "[[$1|$2]]");
 	}
 
 	/**
@@ -3721,18 +3719,19 @@ class MarkdownFormatter {
 	}
 
 	/**
-	 * Get the image URL for a monster from fluff data
+	 * Get the token image URL for a monster (for statblock)
 	 */
-	_getMonsterImageUrl(monster) {
-		if (!this.monsterFluffLookup) return null;
-		const key = `${monster.name}|${monster.source}`.toLowerCase();
-		const imagePath = this.monsterFluffLookup.get(key);
-		if (imagePath) {
-			// Convert internal path to 5etools URL, escaping spaces
-			const escapedPath = imagePath.replace(/ /g, "%20");
-			return `https://5e.tools/img/${escapedPath}`;
-		}
-		return null;
+	_getMonsterTokenUrl(monster) {
+		const escapedName = monster.name.replace(/ /g, "%20");
+		return `https://5e.tools/img/bestiary/tokens/${monster.source}/${escapedName}.webp`;
+	}
+
+	/**
+	 * Get the main art image URL for a monster (for markdown)
+	 */
+	_getMonsterArtUrl(monster) {
+		const escapedName = monster.name.replace(/ /g, "%20");
+		return `https://5e.tools/img/bestiary/${monster.source}/${escapedName}.webp`;
 	}
 
 	/**
@@ -3746,11 +3745,8 @@ class MarkdownFormatter {
 		lines.push(`columnWidth: 325`);
 		lines.push(`columnHeight: 750`);
 
-		// Image (from fluff data)
-		const imageUrl = this._getMonsterImageUrl(monster);
-		if (imageUrl) {
-			lines.push(`image: ${imageUrl}`);
-		}
+		// Image (token for statblock)
+		lines.push(`image: ${this._getMonsterTokenUrl(monster)}`);
 
 		// Name
 		lines.push(`name: ${this._escapeYamlString(monster.name)}`);
@@ -4056,11 +4052,13 @@ class MarkdownExportEngine {
 			console.warn("Failed to load legendary groups, lair actions/regional effects won't be added:", e.message);
 		}
 
-		// Load monster fluff data for images
+		// Load monster fluff data for images (only direct images, not inherited)
+		// Monsters without direct fluff art will use token fallback
 		this.monsterFluffLookup = new Map();
 		try {
 			const bestiaryDir = path.join(this.dataDir, "bestiary");
 			const fluffFiles = fs.readdirSync(bestiaryDir).filter(f => f.startsWith("fluff-bestiary-"));
+
 			for (const file of fluffFiles) {
 				const filePath = path.join(bestiaryDir, file);
 				const data = readJson(filePath);
@@ -4077,16 +4075,18 @@ class MarkdownExportEngine {
 					if (fluff.images && fluff.images.length > 0) {
 						firstImage = fluff.images[0];
 					}
-					// Check _copy._mod.images.items (for entries using inheritance)
+					// Check _copy._mod.images.items (for entries with their own image override)
 					else if (fluff._copy?._mod?.images?.items && fluff._copy._mod.images.items.length > 0) {
 						firstImage = fluff._copy._mod.images.items[0];
 					}
+					// Don't inherit from parent - let token fallback handle it
 
 					if (firstImage?.href?.type === "internal" && firstImage.href?.path) {
 						this.monsterFluffLookup.set(key, firstImage.href.path);
 					}
 				}
 			}
+
 			this.log(`Loaded monster fluff data (${this.monsterFluffLookup.size} monsters with images)`);
 		} catch (e) {
 			console.warn("Failed to load monster fluff, images won't be added:", e.message);
